@@ -6,7 +6,7 @@
   <strong>Multi-account quota pooling, zero-hang hot-swapping & refined UI for Google Antigravity</strong>
 </p>
 
-[![Version](https://img.shields.io/badge/version-2.1.17-blue.svg?style=for-the-badge&logo=electron)](https://github.com/ewnry/angrplus)
+[![Version](https://img.shields.io/badge/version-2.28.0-blue.svg?style=for-the-badge&logo=electron)](https://github.com/ewnry/angrplus)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-orange.svg?style=for-the-badge)](LICENSE)
