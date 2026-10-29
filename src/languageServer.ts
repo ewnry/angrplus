@@ -1,0 +1,420 @@
+import { execFile, spawn, ChildProcess } from 'child_process';
+import { app, session } from 'electron';
+import { shellEnvSync } from 'shell-env';
+import * as fs from 'fs';
+import path from 'path';
+import * as readline from 'readline';
+import { PassThrough } from 'stream';
+import { getLsLogPath, getAppDataDirName, getActivePortFilePath } from './paths';
+import { LS_CERT_FINGERPRINT } from './constants';
+import { setupNodeWrapper } from './utils';
+import { startProxy, stopProxy } from './proxy';
+
+
+
+
+
+const LS_STARTUP_TIMEOUT_MS = 60000;
+
+
+
+
+
+const RESTART_WINDOW_MS = 60000;
+const MAX_RESTARTS = 3;
+const RESTART_COOLDOWN_MS = 2000;
+const MAX_STDERR_BUFFER = 100000;
+const CRASH_TRIGGER_PHRASES = [
+  'panic:',
+  'fatal error:',
+  'unexpected fault address',
+  'runtime:',
+  'running GoogleExitFunction',
+  'panic serving',
+];
+
+const isWindows = process.platform === 'win32';
+const binName = isWindows ? 'language_server.exe' : 'language_server';
+export const LS_BINARY = app.isPackaged
+  ? path.join(process.resourcesPath, 'bin', binName)
+  : process.env.CODEIUM_LANGUAGE_SERVER_BIN || path.join(__dirname, '..', 'bin', binName);
+
+export interface LanguageServerHandle {
+  port: number;
+  process: ChildProcess;
+  exitPromise: Promise<ExitInfo>;
+}
+
+export interface ExitInfo {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  crashStackTrace: string | undefined;
+}
+
+export interface StartMonitorOptions {
+  headless?: boolean;
+  onPortChanged?: (newPort: number) => void;
+}
+
+
+
+
+
+let _lsProcess: ChildProcess | null = null;
+let _lsPort = 0;
+let _intentionalTermination = false;
+let _restartCount = 0;
+let _lastRestartTime = 0;
+
+
+
+
+
+
+export function getLsCL(): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(LS_BINARY, ['--stamp'], (error, stdout, _stderr) => {
+      if (error) {
+        console.error('Failed to get LS stamp:', error);
+        resolve('');
+        return;
+      }
+      const match = /Built at CL: (\d+)/.exec(stdout);
+      if (match) {
+        resolve(match[1]);
+      } else {
+        resolve('');
+      }
+    });
+  });
+}
+
+
+const PORT_PATTERN = /listening on \w+ port at (\d+) for HTTP(S)?\b/i;
+
+const AUTH_URL_PATTERN = /https:\/\/accounts\.google\.com\/o\/oauth2\/auth\S+/;
+
+
+export function getLsProcess(): ChildProcess | null {
+  return _lsProcess;
+}
+
+
+export function getLsPort(): number {
+  return _lsPort;
+}
+
+
+export function clearLsProcess(): void {
+  _lsProcess = null;
+}
+
+
+
+
+
+
+function getLinesAfterCrash(lines: string[]): string[] {
+  const crashLines: string[] = [];
+  let foundTrigger = false;
+  for (const line of lines) {
+    if (CRASH_TRIGGER_PHRASES.some((phrase) => line.includes(phrase))) {
+      foundTrigger = true;
+    }
+    if (foundTrigger) {
+      crashLines.push(line);
+    }
+  }
+  return crashLines;
+}
+
+
+export function extractCrashStackTrace(stderr: string): string | undefined {
+  const lines = stderr.split('\n');
+  const crashLines = getLinesAfterCrash(lines);
+  return crashLines.length > 0 ? crashLines.join('\n') : undefined;
+}
+
+interface NodeModuleConfig {
+  name: string;
+  envVar: string;
+  relativePath: string[];
+}
+
+
+function setupNodeModules(env: Record<string, string | undefined>, modules: NodeModuleConfig[]): void {
+  for (const mod of modules) {
+    let entryPoint = '';
+    if (!app.isPackaged) {
+      entryPoint = path.join(__dirname, '..', 'node_modules', mod.name, ...mod.relativePath);
+    } else {
+      entryPoint = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', mod.name, ...mod.relativePath);
+    }
+    env[mod.envVar] = entryPoint;
+  }
+}
+
+
+export function startLanguageServer(port: number, csrf: string, headless?: boolean): Promise<LanguageServerHandle> {
+  return new Promise(async (resolve, reject) => {
+    const logStream = fs.createWriteStream(getLsLogPath(), { flags: 'w' });
+
+    let proxyPort: number;
+    try {
+      proxyPort = await startProxy();
+    } catch (err) {
+      console.error('[LanguageServer] Failed to start local proxy:', err);
+      logStream.end();
+      reject(err);
+      return;
+    }
+
+    const apiServerUrl = `http://127.0.0.1:${proxyPort}`;
+
+
+    const args: string[] = [
+      '--standalone',
+      '--override_ide_name',
+      'antigravity',
+      '--subclient_type',
+      'hub',
+      '--override_ide_version',
+      app.getVersion(),
+      '--override_user_agent_name',
+      'antigravity',
+      '--https_server_port',
+      String(port),
+      '--csrf_token',
+      csrf,
+      '--app_data_dir',
+      getAppDataDirName(),
+      '--api_server_url',
+      apiServerUrl,
+      '--cloud_code_endpoint',
+      apiServerUrl,
+      '--inference_api_server_url',
+      apiServerUrl,
+      '--enable_sidecars',
+    ];
+    if (headless) {
+      args.push('--headless');
+    }
+
+    const safeArgs = args.map((a) => (a === csrf ? '***' : a));
+    console.log(`\nSpawning: ${LS_BINARY} ${safeArgs.join(' ')}\n`);
+
+
+    const env: Record<string, string | undefined> = { ...process.env, ...shellEnvSync() };
+
+
+    env['AGY_BROWSER_ACTIVE_PORT_FILE'] = getActivePortFilePath();
+    setupNodeWrapper(env);
+    setupNodeModules(env, [
+      {
+        name: 'chrome-devtools-mcp',
+        envVar: 'CHROME_DEVTOOLS_MCP_JS',
+        relativePath: ['build', 'src', 'bin', 'chrome-devtools-mcp.js'],
+      },
+    ]);
+    _lsProcess = spawn(LS_BINARY, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: env as Record<string, string>,
+    });
+    if (!headless) {
+
+      _lsProcess.stdin?.end();
+    }
+    const combined = new PassThrough();
+    _lsProcess.stdout?.pipe(combined, { end: false });
+    _lsProcess.stderr?.pipe(combined, { end: false });
+
+    const stderrChunks: string[] = [];
+    let stderrLength = 0;
+    _lsProcess.stderr?.on('data', (data) => {
+      const str = data.toString();
+      stderrChunks.push(str);
+      stderrLength += str.length;
+      while (stderrChunks.length > 0 && stderrLength > MAX_STDERR_BUFFER) {
+        stderrLength -= stderrChunks.shift()!.length;
+      }
+    });
+    let resolved = false;
+    let logStreamEnded = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        reject(new Error(`Timeout: language server did not report its port within ${LS_STARTUP_TIMEOUT_MS / 1000}s`));
+      }
+    }, LS_STARTUP_TIMEOUT_MS);
+    const rl = readline.createInterface({ input: combined, crlfDelay: Infinity });
+    rl.on('close', () => {
+      if (!logStreamEnded) {
+        logStreamEnded = true;
+        logStream.end();
+      }
+    });
+    rl.on('line', (line) => {
+      if (!logStreamEnded) {
+        logStream.write(line + '\n');
+      }
+      if (!resolved) {
+        const m = PORT_PATTERN.exec(line);
+        if (m) {
+          resolved = true;
+          clearTimeout(timer);
+          const actualPort = parseInt(m[1], 10);
+          _lsPort = actualPort;
+          resolve({
+            port: actualPort,
+            process: _lsProcess!,
+            exitPromise,
+          });
+        }
+      }
+      const authMatch = AUTH_URL_PATTERN.exec(line);
+      if (authMatch) {
+        console.log('\n' + '='.repeat(60));
+        console.log('  Please visit the following URL to authorize.');
+        console.log('  After authorizing, paste the authorization code below.');
+        console.log(`  ${authMatch[0]}`);
+        console.log('='.repeat(60) + '\n');
+      }
+    });
+
+
+    const exitPromise = new Promise<ExitInfo>((exitResolve) => {
+      _lsProcess!.on('exit', (code, signal) => {
+        if (!logStreamEnded) {
+          logStreamEnded = true;
+          logStream.end();
+        }
+        const fullStderr = stderrChunks.join('');
+        const crashStackTrace = extractCrashStackTrace(fullStderr);
+
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          reject(new Error(`Language server exited unexpectedly (code=${code}, signal=${signal})`));
+        }
+        exitResolve({ code, signal, crashStackTrace });
+      });
+    });
+  });
+}
+
+
+export function setIntentionalTermination(value: boolean): void {
+  _intentionalTermination = value;
+}
+
+
+export async function startAndMonitorLanguageServer(
+  port: number,
+  csrf: string,
+  options: StartMonitorOptions = {},
+): Promise<LanguageServerHandle> {
+  setIntentionalTermination(false);
+  const handle = await startLanguageServer(port, csrf, options.headless);
+  _lsPort = handle.port;
+  if (options.onPortChanged) {
+    options.onPortChanged(_lsPort);
+  }
+  monitorLsCrashInternal(handle, port, csrf, options);
+  return handle;
+}
+
+function monitorLsCrashInternal(
+  handle: LanguageServerHandle,
+  port: number,
+  csrf: string,
+  options: StartMonitorOptions,
+): void {
+  void handle.exitPromise.then(async (exitInfo) => {
+    clearLsProcess();
+    if (_intentionalTermination) {
+      return;
+    }
+    const { code, signal, crashStackTrace } = exitInfo;
+    const summary = signal ? `killed by signal ${signal}` : `exited with code ${code}`;
+    console.error(`\nLanguage server crashed: ${summary}`);
+    if (crashStackTrace) {
+      console.error('--- Crash Stack Trace ---');
+      console.error(crashStackTrace);
+      console.error('--- End Crash Stack trace ---');
+    }
+    const now = Date.now();
+    if (now - _lastRestartTime > RESTART_WINDOW_MS) {
+      _restartCount = 0;
+    }
+    _lastRestartTime = now;
+    if (_restartCount >= MAX_RESTARTS) {
+      const msg = `Language server crashed ${MAX_RESTARTS} times in a row. Giving up.`;
+      console.error(msg);
+      return;
+    }
+    _restartCount++;
+    console.log(`Attempting restart ${_restartCount}/${MAX_RESTARTS} in ${RESTART_COOLDOWN_MS / 1000}s...`);
+    await sleep(RESTART_COOLDOWN_MS);
+    if (_intentionalTermination) {
+      return;
+    }
+    try {
+      const newHandle = await startLanguageServer(port, csrf);
+      _lsPort = newHandle.port;
+      if (options.onPortChanged) {
+        options.onPortChanged(_lsPort);
+      }
+
+      monitorLsCrashInternal(newHandle, port, csrf, options);
+    } catch (err) {
+      console.error(`Failed to restart language server: ${(err as Error).message}`);
+    }
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function killLanguageServer(): Promise<void> {
+  setIntentionalTermination(true);
+  await stopProxy();
+  const proc = getLsProcess();
+  if (proc) {
+    const pid = proc.pid;
+    console.log('Shutting down language server…');
+    const exitPromise = new Promise<void>((resolve) => {
+      proc.once('exit', () => {
+        resolve();
+      });
+    });
+    proc.kill('SIGTERM');
+    const result = await Promise.race([
+      exitPromise.then(() => 'exited' as const),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 5000)),
+    ]);
+    if (result === 'timeout' && pid !== undefined) {
+      console.warn(`Language server (PID ${pid}) did not exit gracefully within 5s. Sending SIGKILL.`);
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+
+      }
+    }
+    clearLsProcess();
+  }
+}
+
+
+export function setupLocalCertTrust(): void {
+  session.defaultSession.setCertificateVerifyProc((request, callback) => {
+    if (
+      (request.hostname === '127.0.0.1' || request.hostname === 'localhost') &&
+      request.certificate.fingerprint === LS_CERT_FINGERPRINT
+    ) {
+      callback(0);
+    } else {
+      callback(-3);
+    }
+  });
+}

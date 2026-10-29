@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build_temp/
+.build-tmp/
+.build-runtime-*/
+installer/*.gz
+installer/*.zip
+*.exe
+*.exeold*
+*.log
+account_pool.json
+.DS_Store

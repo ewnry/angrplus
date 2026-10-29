@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const archive=fs.readFileSync(path.join(root,'installer/runtime-patch.zip'));
+const version=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
+let script=fs.readFileSync(path.join(root,'scripts/install-windows-template.ps1'),'utf8');
+script=script.replace(/\$release = '[^']*'/,`$release = '${version}'`).replace('RUNTIME_SHA256',crypto.createHash('sha256').update(archive).digest('hex'));
+script=script.replace('Invoke-WebRequest -UseBasicParsing -Uri "https://ag.rak.wtf/runtime-patch.zip?release=$release" -OutFile $archive',`[IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String('${archive.toString('base64')}'))`);
+script=script.replace('Downloading patch modules...','Extracting patch modules...');
+const output=path.resolve(process.argv[2]||path.join(root,'AntigravityPlus_Windows.ps1'));
+fs.writeFileSync(output,'\uFEFF'+script,'utf8');
+console.log(`PowerShell ${version}: ${output} (${fs.statSync(output).size} bytes)`);
