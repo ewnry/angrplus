@@ -1,4 +1,7 @@
-
+/**
+ * Antigravity Multi-Account Pool & Hot-Swap Engine.
+ * Manages multiple Google accounts, aggregates quotas/limits, and enables seamless hot-swapping during generation.
+ */
 
 import * as http from 'node:http';
 import * as https from 'node:https';
@@ -9,8 +12,9 @@ import { app } from 'electron';
 import log from 'electron-log';
 import { loginGoogleAccount } from './googleOAuth';
 
-export const ANTIGRAVITY_CLIENT_ID = String.fromCharCode(49, 48, 55, 49, 48, 48, 54, 48, 54, 48, 53, 57, 49, 45, 116, 109, 104, 115, 115, 105, 110, 50, 104, 50, 49, 108, 99, 114, 101, 50, 51, 53, 118, 116, 111, 108, 111, 106, 104, 52, 103, 52, 48, 51, 101, 112, 46, 97, 112, 112, 115, 46, 103, 111, 111, 103, 108, 101, 117, 115, 101, 114, 99, 111, 110, 116, 101, 110, 116, 46, 99, 111, 109);
-export const ANTIGRAVITY_CLIENT_SECRET = String.fromCharCode(71, 79, 67, 83, 80, 88, 45, 75, 53, 56, 70, 87, 82, 52, 56, 54, 76, 100, 76, 74, 49, 109, 76, 66, 56, 115, 88, 67, 52, 122, 54, 113, 68, 65, 102);
+// OAuth credentials are intentionally excluded from source. Configure the variables below before running.
+export const ANTIGRAVITY_CLIENT_ID = process.env.ANTIGRAVITY_OAUTH_CLIENT_ID || '';
+export const ANTIGRAVITY_CLIENT_SECRET = process.env.ANTIGRAVITY_OAUTH_CLIENT_SECRET || '';
 export const CLOUDCODE_ENDPOINT = 'https://daily-cloudcode-pa.googleapis.com';
 
 export interface QuotaBucketInfo {
@@ -77,8 +81,8 @@ export interface CombinedQuotaSummary {
   checkedAt: number;
   totalAccounts: number;
   activeAccountsCount: number;
-  combinedRemainingFraction: number;
-  totalCapacityPercent: number;
+  combinedRemainingFraction: number; // 0.0 - 1.0
+  totalCapacityPercent: number; // e.g. 175% across 2 accounts
   earliestResetTime?: string;
   groups: QuotaGroupInfo[];
   rawResponse?: Record<string, unknown>;
@@ -146,7 +150,9 @@ export function savePoolConfig(config: AccountPoolConfig): void {
   }
 }
 
-
+/**
+ * Reads the native Antigravity session from Windows Credential Manager (`gemini:antigravity`).
+ */
 export async function readNativeWindowsCredential(): Promise<{
   refreshToken?: string;
   accessToken?: string;
@@ -197,7 +203,7 @@ else:
               clientId = payload.azp || payload.aud;
             }
           } catch {
-
+            /* ignore jwt decode error */
           }
         }
 
@@ -216,7 +222,9 @@ else:
   });
 }
 
-
+/**
+ * Capture currently active session in Antigravity into the pool.
+ */
 export async function captureActiveNativeSession(): Promise<PooledAccount> {
   const cred = await readNativeWindowsCredential();
   if (!cred || !cred.refreshToken) {
@@ -258,12 +266,14 @@ export async function captureActiveNativeSession(): Promise<PooledAccount> {
   savePoolConfig(config);
   log.info(`[AccountPool] Captured native account: ${account.email}`);
 
-
+  // Fetch userinfo and initial quota in background
   void enrichAccountProfile(account.id);
   return account;
 }
 
-
+/**
+ * Fetches user profile (name, photo) from Google userinfo API.
+ */
 export async function enrichAccountProfile(accountId: string): Promise<void> {
   const config = loadPoolConfig();
   const account = config.accounts.find((a) => a.id === accountId);
@@ -321,11 +331,13 @@ export async function enrichAccountProfile(accountId: string): Promise<void> {
       }
     }
   } catch {
-
+    /* ignore */
   }
 }
 
-
+/**
+ * Refreshes access token for a pooled account if expired or about to expire.
+ */
 const tokenRefreshes = new Map<string, { refreshToken: string; promise: Promise<PooledAccount> }>();
 
 export function refreshPooledAccount(account: PooledAccount): Promise<PooledAccount> {
@@ -379,11 +391,11 @@ async function refreshPooledAccountOnce(account: PooledAccount): Promise<PooledA
             };
             if (json.refresh_token) updated.refreshToken = json.refresh_token;
 
-
+            // Persist
             const cfg = loadPoolConfig();
             const idx = cfg.accounts.findIndex((a) => a.id === account.id);
             if (idx >= 0) {
-
+              // Quota refresh / cooldown changes may have completed while OAuth was pending.
               cfg.accounts[idx] = { ...cfg.accounts[idx], accessToken: updated.accessToken,
                 expiresAt: updated.expiresAt, refreshToken: updated.refreshToken };
               savePoolConfig(cfg);
@@ -407,7 +419,9 @@ async function refreshPooledAccountOnce(account: PooledAccount): Promise<PooledA
   });
 }
 
-
+/**
+ * Fetch quota for a single account from Google Cloud Code.
+ */
 export async function fetchAccountQuota(account: PooledAccount, rawHeaders?: http.IncomingHttpHeaders): Promise<PooledAccount['lastQuota']> {
   const refreshed = await refreshPooledAccount(account);
   const headers: Record<string, string> = {
@@ -415,7 +429,7 @@ export async function fetchAccountQuota(account: PooledAccount, rawHeaders?: htt
     Authorization: `Bearer ${refreshed.accessToken}`,
   };
 
-
+  // Copy standard client headers from vendor if present
   if (rawHeaders) {
     for (const key of ['x-goog-api-client', 'user-agent']) {
       if (rawHeaders[key]) headers[key] = String(rawHeaders[key]);
@@ -473,14 +487,14 @@ export async function fetchAccountQuota(account: PooledAccount, rawHeaders?: htt
               rawResponse: json,
             };
 
-
+            // Save to account
             const cfg = loadPoolConfig();
             const idx = cfg.accounts.findIndex((a) => a.id === account.id);
             if (idx >= 0) {
               cfg.accounts[idx].lastQuota = quotaSnapshot;
               savePoolConfig(cfg);
               try { require('./quotaHistory').recordQuota(path.dirname(getPoolFilePath()), account.id, quotaSnapshot); }
-              catch {  }
+              catch { /* History must not interrupt quota refresh or account rotation. */ }
             }
 
             resolve(quotaSnapshot);
@@ -500,7 +514,9 @@ export async function fetchAccountQuota(account: PooledAccount, rawHeaders?: htt
   });
 }
 
-
+/**
+ * Fetch and aggregate quotas across all accounts in the pool into a unified/stacked quota response.
+ */
 type CombinedQuotaResult = { summary: CombinedQuotaSummary; aggregatedResponse: Record<string, unknown> };
 let combinedQuotaRequest: Promise<CombinedQuotaResult> | undefined;
 export function fetchCombinedPoolQuota(rawHeaders?: http.IncomingHttpHeaders): Promise<CombinedQuotaResult> {
@@ -533,7 +549,7 @@ async function fetchCombinedPoolQuotaOnce(rawHeaders?: http.IncomingHttpHeaders)
     };
   }
 
-
+  // Fetch quotas in parallel
   const quotaResults = await Promise.all(
     accounts.map(async (acc) => {
       try {
@@ -560,7 +576,7 @@ export function mergeAccountQuotas(
   const mode = config.quotaDisplayMode || 'normalized';
   const showActive = config.showActiveInLimits === true;
 
-
+  // Merge groups and buckets across accounts
   const mergedGroupsMap = new Map<string, {
     displayName?: string;
     description?: string;
@@ -635,8 +651,8 @@ export function mergeAccountQuotas(
       const sortedResets = [...b.resetTimes].sort();
       const earliestReset = sortedResets[0];
 
-
-
+      // Format clean short titles per user request:
+      // "Weekly (X accounts)", "5 Hours (X accounts)"
       const isWeekly = /weekly/i.test(b.bucketId) || /weekly/i.test(b.displayName || '');
       const is5h = /5h/i.test(b.bucketId) || /five\s*hour/i.test(b.displayName || '');
       let baseTitle = b.displayName || b.bucketId;
@@ -653,7 +669,7 @@ export function mergeAccountQuotas(
         displayFraction = b.activeFraction !== undefined ? b.activeFraction : avgFraction;
         label = `${baseTitle} (Active)`;
       } else {
-
+        // 'normalized' (0..1.0 scale)
         displayFraction = Math.max(0, Math.min(1.0, avgFraction));
         label = `${baseTitle} (${N} accounts)`;
       }
@@ -677,7 +693,7 @@ export function mergeAccountQuotas(
         resetTime: mode === 'active' && b.activeResetTime ? b.activeResetTime : earliestReset,
       });
 
-
+      // If showActive is enabled and we are not in active mode and have multiple accounts, append an Active row
       if (showActive && mode !== 'active' && b.activeFraction !== undefined && N > 1) {
         const activeLabel = `${baseTitle} (Active)`;
         const activeBucket: QuotaBucketInfo = {
@@ -713,7 +729,7 @@ export function mergeAccountQuotas(
     });
   });
 
-
+  // Calculate overall pool metrics per account
   const accountFractions: number[] = accounts.map((_acc, idx) => {
     const q = quotaResults[idx];
     if (!q || !q.groups) return 1.0;
@@ -764,27 +780,31 @@ export function mergeAccountQuotas(
   return { summary, aggregatedResponse };
 }
 
-
+/**
+ * Helper to identify Claude / 3P models.
+ */
 export function isClaudeModel(modelName?: string): boolean {
   if (!modelName) return false;
   const lower = modelName.toLowerCase();
   return lower.includes('claude') || lower.includes('sonnet') || lower.includes('opus') || lower.includes('3p') || lower.includes('gpt');
 }
 
-
+/**
+ * Checks if a pooled account is exhausted or in cooldown for the requested model.
+ */
 export function isAccountExhaustedForModel(account: PooledAccount, modelName?: string, now = Date.now()): boolean {
-
+  // Global cooldown
   if ((account.cooldownUntil || 0) > now) return true;
 
   const isClaude = isClaudeModel(modelName);
   const modelKey = isClaude ? 'claude' : 'gemini';
 
-
+  // Model-specific cooldown
   if (account.modelCooldowns && (account.modelCooldowns[modelKey] || 0) > now) {
     return true;
   }
 
-
+  // Quota bucket check
   if (account.lastQuota && Array.isArray(account.lastQuota.groups) && account.lastQuota.groups.length > 0) {
     if (isClaude) {
       const claudeGroup = account.lastQuota.groups.find((g) =>
@@ -815,7 +835,7 @@ export function isAccountExhaustedForModel(account: PooledAccount, modelName?: s
     }
   }
 
-
+  // Fallback to general remainingFraction if <= 0.01 (when no group data available)
   if (account.lastQuota?.remainingFraction !== undefined && account.lastQuota.remainingFraction <= 0.01) {
     return true;
   }
@@ -823,7 +843,9 @@ export function isAccountExhaustedForModel(account: PooledAccount, modelName?: s
   return false;
 }
 
-
+/**
+ * Gets remaining fraction for sorting candidates by model availability.
+ */
 export function getAccountQuotaForModel(account: PooledAccount, modelName?: string): number {
   const isClaude = isClaudeModel(modelName);
   if (account.lastQuota && Array.isArray(account.lastQuota.groups)) {
@@ -854,7 +876,9 @@ export function getAccountQuotaForModel(account: PooledAccount, modelName?: stri
   return account.lastQuota?.remainingFraction ?? 0.5;
 }
 
-
+/**
+ * Finds best available candidate account in the pool for a specific model, excluding given accounts.
+ */
 export function findBestAvailableAccount(
   modelName?: string,
   excludeAccountIds?: Set<string>,
@@ -870,7 +894,10 @@ export function findBestAvailableAccount(
   return candidates[0];
 }
 
-
+/**
+ * Selects the best account to route an inference request through.
+ * If the active account is depleted or in cooldown, automatically failovers to the standby account.
+ */
 export async function getEffectiveAccountForRequest(modelName?: string): Promise<{
   account: PooledAccount;
   didHotSwap: boolean;
@@ -910,7 +937,9 @@ export async function getEffectiveAccountForRequest(modelName?: string): Promise
   return { account: refreshed, didHotSwap: false };
 }
 
-
+/**
+ * Records a 429 / 403 quota exhaustion on an account and immediately hot-swaps if possible.
+ */
 export async function reportAccountExhaustion(
   accountId: string,
   statusCode: number,
@@ -923,7 +952,7 @@ export async function reportAccountExhaustion(
   if (accountIndex < 0) return { nextAccount: null, previousEmail: 'unknown' };
 
   const current = config.accounts[accountIndex];
-  const cooldownDuration = retryAfterMs || 3600_000;
+  const cooldownDuration = retryAfterMs || 3600_000; // default 1 hour
   const now = Date.now();
   const isClaude = isClaudeModel(modelName);
 
@@ -981,7 +1010,7 @@ export async function reportAccountExhaustion(
           win.webContents?.send('pool:hotswapped', { from: current.email, to: next.email });
         });
       } catch {
-
+        /* ignore */
       }
       return { nextAccount: refreshed, previousEmail: current.email };
       }
@@ -993,7 +1022,9 @@ export async function reportAccountExhaustion(
 
 let activeOAuthAbort: AbortController | null = null;
 
-
+/**
+ * Initiates interactive Google Login in browser to add a new account to the pool.
+ */
 export async function startAddGoogleAccountFlow(openExternal: (url: string) => Promise<unknown>): Promise<PooledAccount> {
   activeOAuthAbort?.abort();
   activeOAuthAbort = new AbortController();
@@ -1045,7 +1076,7 @@ export async function startAddGoogleAccountFlow(openExternal: (url: string) => P
 
   savePoolConfig(config);
 
-
+  // Discover real profile photo & initial quota
   void enrichAccountProfile(newAccount.id);
   void fetchAccountQuota(newAccount);
 

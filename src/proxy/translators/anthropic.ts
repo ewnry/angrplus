@@ -1,4 +1,7 @@
-
+/**
+ * Anthropic provider translator.
+ * Handles Gemini ↔ Anthropic request/response mapping and streaming SSE events.
+ */
 import * as path from 'path';
 
 import log from 'electron-log';
@@ -20,7 +23,7 @@ import {
 } from '../shared';
 import { detectModelCapabilitiesByName } from '../modelUtils';
 
-
+// ─── Types ────────────────────────────────────────────────────────────────
 
 interface GeminiTool {
   functionDeclarations?: GeminiFunctionDeclaration[];
@@ -145,7 +148,7 @@ interface GeminiUsageMetadata {
   totalTokenCount: number;
 }
 
-
+// ─── REQUEST: Gemini → Anthropic ──────────────────────────────────────────
 
 function mapGeminiToolsToAnthropic(geminiTools: GeminiTool[]): AnthropicTool[] {
   if (!geminiTools || !Array.isArray(geminiTools)) return [];
@@ -296,7 +299,7 @@ export function mapGeminiToAnthropic(
       }
     }
   }
-
+  // Anthropic requires tool results before text, even when Gemini splits the results across items.
   flushToolResults();
 
   const result: AnthropicRequestBody = {
@@ -306,7 +309,7 @@ export function mapGeminiToAnthropic(
     max_tokens: geminiBody.generationConfig?.maxOutputTokens ?? 16000,
   };
 
-
+  // Claude thinking models don't support temperature (centralized detection)
   const { isThinkingModel } = detectModelCapabilitiesByName(modelName);
   if (!isThinkingModel) {
     const temp = geminiBody.generationConfig?.temperature;
@@ -321,7 +324,7 @@ export function mapGeminiToAnthropic(
   return result;
 }
 
-
+// ─── RESPONSE: Anthropic → Gemini ─────────────────────────────────────────
 
 export function mapAnthropicToGemini(
   anthRes: AnthropicResponse,
@@ -388,7 +391,7 @@ export function mapAnthropicToGemini(
   };
 }
 
-
+// ─── STREAM CHUNK: Anthropic SSE → Gemini ─────────────────────────────────
 
 export function mapAnthropicChunkToGemini(
   chunk: AnthropicResponse,

@@ -1,5 +1,5 @@
 import { applyThemeIcon } from './themeIcons';
-
+/** Addon-owned channels only; vendor desktop APIs are left intact. */
 import { app, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
 import * as cryptoStore from './cryptoStore';
@@ -26,6 +26,29 @@ export function registerCustomModelHandlers(): void {
       }
     });
   };
+  const customizationFile = path.join(app.getPath('home'), '.gemini', 'antigravity', 'plus-customizations.json');
+  const readCustomizations = () => {
+    const fs = require('node:fs');
+    try { const data = JSON.parse(fs.readFileSync(customizationFile, 'utf8')); return { css: typeof data.css === 'string' ? data.css : '', cssEnabled: data.cssEnabled === true, themeSource: typeof data.themeSource === 'string' ? data.themeSource : '', themeScript: typeof data.themeScript === 'string' ? data.themeScript : '', plugins: Array.isArray(data.plugins) ? data.plugins.filter((p: any) => p && typeof p.id === 'string' && typeof p.code === 'string' && typeof p.name === 'string').slice(0, 50) : [] }; }
+    catch (e: any) { if (e.code === 'ENOENT') return { css: '', cssEnabled: false, themeSource: '', themeScript: '', plugins: [] }; throw e; }
+  };
+  const themesDirectory = path.join(app.getPath('home'), '.gemini', 'antigravity', 'themes');
+  handle('plus-customizations:themes', () => {
+    const fs = require('node:fs'); fs.mkdirSync(themesDirectory, { recursive: true });
+    return { success: true, files: fs.readdirSync(themesDirectory, { withFileTypes: true }).filter((entry: any) => entry.isFile() && /\.(css|plus)$/i.test(entry.name)).map((entry: any) => entry.name).sort((a: string, b: string) => a.localeCompare(b)), directory: themesDirectory };
+  });
+  handle('plus-customizations:theme-read', (name: string) => {
+    if (typeof name !== 'string' || name !== path.basename(name) || !/\.(css|plus)$/i.test(name)) throw new Error('Invalid theme filename');
+    const fs = require('node:fs'); const file = path.join(themesDirectory, name); const stat = fs.lstatSync(file); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2000000) throw new Error('Theme must be a CSS file under 2 MB');
+    const scriptFile = path.join(themesDirectory, name.slice(0, -4) + '.js'); let themeScript = ''; if (/\.css$/i.test(name) && fs.existsSync(scriptFile)) { const info = fs.lstatSync(scriptFile); if (!info.isFile() || info.isSymbolicLink() || info.size > 500000) throw new Error('Theme script must be a regular JS file under 500 KB'); themeScript = fs.readFileSync(scriptFile, 'utf8'); } return { success: true, css: fs.readFileSync(file, 'utf8'), themeScript };
+  });
+  handle('plus-customizations:themes-open', async () => { const fs = require('node:fs'); fs.mkdirSync(themesDirectory, { recursive: true }); const error = await (shell as any).openPath(themesDirectory); if (error) throw new Error(error); return { success: true }; });
+  handle('plus-customizations:read', () => readCustomizations());
+  handle('plus-customizations:save', (value: any) => {
+    if (!value || typeof value.css !== 'string' || value.css.length > 2000000 || (value.themeSource !== undefined && (typeof value.themeSource !== 'string' || value.themeSource.length > 2000000)) || (value.themeScript !== undefined && (typeof value.themeScript !== 'string' || value.themeScript.length > 500000)) || !Array.isArray(value.plugins) || value.plugins.length > 50 || value.plugins.some((p: any) => !p || typeof p.id !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(p.id) || typeof p.name !== 'string' || p.name.length > 100 || typeof p.code !== 'string' || p.code.length > 500000 || typeof p.enabled !== 'boolean')) throw new Error('Invalid customization data');
+    if (new Set(value.plugins.map((p: any) => p.id)).size !== value.plugins.length) throw new Error('Duplicate plugin ID');
+    const fs = require('node:fs'); fs.mkdirSync(path.dirname(customizationFile), { recursive: true }); const tmp = customizationFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ css: value.css, cssEnabled: value.cssEnabled === true, themeSource: value.themeSource || '', themeScript: value.themeScript || '', plugins: value.plugins }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, customizationFile); return { success: true };
+  });
   const insightsRoot = path.join(app.getPath('home'), '.gemini', 'antigravity');
   let geminiWeb: any;
   const web = () => geminiWeb ||= new (require('./geminiWeb').GeminiWeb)(insightsRoot);
@@ -136,19 +159,19 @@ export function registerCustomModelHandlers(): void {
   handle('storage:google-test-account', manager.googleTestAccount);
   handle('storage:google-pool-status', manager.googlePoolStatus);
 
-
+  // ─── Multi-Account Pool & Hot-Swap IPC ────────────────────────────────────
   let accountPool: typeof import('./accountPool') | null = null;
   try {
     accountPool = require('./accountPool');
   } catch {
-
+    /* accountPool mock missing in unit tests */
   }
 
   let plusUpdater: typeof import('./plusUpdater') | null = null;
   try {
     plusUpdater = require('./plusUpdater');
   } catch {
-
+    /* plusUpdater mock missing in unit tests */
   }
 
   handle('pool:get-status', async () => {
@@ -156,11 +179,11 @@ export function registerCustomModelHandlers(): void {
     const cfg = accountPool.loadPoolConfig();
     let summary = null;
     try {
-
+      // Reading settings must never wait for OAuth / eight remote quota requests.
       const res = accountPool.mergeAccountQuotas(cfg.accounts, cfg.accounts.map((account) => account.lastQuota), cfg);
       summary = res.summary;
     } catch {
-
+      /* ignore */
     }
     return {
       success: true,
@@ -355,7 +378,7 @@ export function registerCustomModelHandlers(): void {
           return { success: true, dataUri: `data:audio/mpeg;base64,${buf.toString('base64')}`, filePath: p };
         }
       } catch {
-
+        /* ignore */
       }
     }
     return { success: false, error: 'Sound not found: ' + safeName };
@@ -367,7 +390,7 @@ export function registerCustomModelHandlers(): void {
 
 
 
-
+  // ─── Antigravity+ In-App Updater IPC ──────────────────────────────────────
   handle('plus:get-version', () => ({
     version: plusUpdater?.ANTIGRAVITY_PLUS_VERSION || '2.1.0',
   }));
@@ -391,7 +414,7 @@ export function registerCustomModelHandlers(): void {
             }
           }
         } catch {
-
+          /* ignore */
         }
       };
 
@@ -432,12 +455,12 @@ export function playNativeCompletionSound(soundName?: string): { success: boolea
         if (!soundTheme && cfg.soundTheme) soundTheme = cfg.soundTheme;
       }
     } catch {
-
+      /* ignore */
     }
 
     const safeName = path.basename(soundTheme || 'minecraft-notification.mp3');
 
-
+    // Broadcast to all Electron renderer windows to play via Web Audio API / HTML5 Audio
     try {
       const { BrowserWindow } = require('electron');
       const wins = BrowserWindow?.getAllWindows?.() || [];
@@ -447,7 +470,7 @@ export function playNativeCompletionSound(soundName?: string): { success: boolea
         }
       }
     } catch {
-
+      /* ignore in tests/headless */
     }
 
     return { success: true };

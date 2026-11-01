@@ -48,7 +48,7 @@ export async function cleanStorage(id: string, trash: (file: string)=>Promise<vo
   let removed = 0, skipped = 0, bytes = 0;
   for (const item of preview.files) {
     try {
-
+      // Check every ancestor again: a directory may have been replaced after preview.
       for (let current = path.dirname(item.file);; current=path.dirname(current)) {
         if ((await fs.lstat(current)).isSymbolicLink()) throw new Error('Linked directory');
         if (path.dirname(current) === current) break;

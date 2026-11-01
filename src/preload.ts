@@ -1,8 +1,12 @@
-
+/**
+ * Preload script — runs in every BrowserWindow before the page loads.
+ * Exposes a minimal, secure API via contextBridge so the renderer can
+ * communicate with the main-process auto-updater without nodeIntegration.
+ */
 
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
-
+// ─── Type Declarations for APIs exposed to renderer ──────────────────────────
 
 interface UpdaterState {
   type: string;
@@ -116,7 +120,7 @@ interface ConnectionTestResult {
   error?: string;
 }
 
-
+// ─── API Definitions ─────────────────────────────────────────────────────────
 
 const updaterAPI: UpdaterAPI = {
   onStateChanged: (callback) => {
@@ -124,7 +128,7 @@ const updaterAPI: UpdaterAPI = {
       callback(state);
     };
     ipcRenderer.on('updater:state-changed', handler);
-
+    // Return unsubscribe function
     return () => {
       ipcRenderer.removeListener('updater:state-changed', handler);
     };
@@ -225,7 +229,7 @@ const ideAPI: IdeAPI = {
   isInstalled: () => ipcRenderer.invoke('ide:is-installed'),
 };
 
-
+// ─── Expose all APIs via contextBridge ──────────────────────────────────────
 
 contextBridge.exposeInMainWorld('electronUpdater', updaterAPI);
 contextBridge.exposeInMainWorld('dialog', dialogAPI);
@@ -238,7 +242,7 @@ contextBridge.exposeInMainWorld('agent', agentAPI);
 contextBridge.exposeInMainWorld('electronNative', electronNativeAPI);
 contextBridge.exposeInMainWorld('ide', ideAPI);
 
-
+// ─── Renderer Augmentations (for TypeScript global type declarations) ──────
 
 declare global {
   interface Window {
@@ -255,5 +259,5 @@ declare global {
   }
 }
 
-
+// Used by the standalone legacy desktop build; installed apps retain their own preload.
 import './customPreload';

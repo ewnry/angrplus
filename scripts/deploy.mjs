@@ -1,5 +1,5 @@
-
-
+// Run with Node.js: node scripts/deploy.mjs
+// Patch a recognized standalone app without executing vendor code.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -83,7 +83,7 @@ function assertInside(root, target) {
     fail('UNSAFE_PATH', `Path is outside the expected directory: ${target}`);
   }
 }
-
+// Do not traverse links/junctions while writing or recursively removing files.
 function assertNoLinks(root, target) {
   assertInside(root, target);
   let current = path.resolve(root);
@@ -122,8 +122,8 @@ function walk(root, relative = '') {
 }
 function hashDirectory(directory) {
   if (!exists(directory)) return null;
-
-
+  // macOS may expose /private/var through /var, and user-supplied parent paths
+  // may have aliases too. Compare resolved link targets to a resolved root.
   const canonicalDirectory = fs.realpathSync(directory);
   const hash = createHash('sha256');
   for (const { name, stat } of walk(directory)) {
@@ -280,7 +280,7 @@ function binaryPlan(resources, requested) {
   const patchedFound = bytes.includes(PATCHED_URL);
   let changed = false;
 
-
+  // Auto-patch hasValidAuth=true (MANAGER_GATE_X64) for x64 Windows binary
   const sigAuth = /\x80\x78\x08\x00\x74[\s\S]\x48\x8b[\s\S]\x24[\s\S]\x48\x89[\s\S]\x60/g;
   const patchAuth = Buffer.from([0xc6, 0x40, 0x08, 0x01, 0x90, 0x90]);
   const binaryStr = bytes.toString('binary');
@@ -343,9 +343,9 @@ export function preflight(options = {}) {
     }
     if (walk(dist).some(({ stat }) => stat.isSymbolicLink()))
       fail('UNSAFE_BUILD', 'Compiled dist must not contain symlinks.');
-
-
-
+    // A repeated installation (including upgrades from the old overlay installer)
+    // must start from the verified original for THIS exact installed version.
+    // Never compose hooks on already patched files or reuse a stale legacy backup.
     if (state && equal(state.patched, current)) {
       vendorFiles = locations(verifyBackup(resources, state));
       info = inspectArchive(vendorFiles.archive);
@@ -436,9 +436,9 @@ function copyMissingUnpacked(source, destination) {
 async function packCandidate(source, candidate, entries) {
   const plan = path.join(path.dirname(source), 'unpacked-plan.json');
   fs.writeFileSync(plan, JSON.stringify(entries));
-
-
-
+  // ASAR 4.3's stream packer hashes relative paths from cwd. Isolate packing in
+  // a child with cwd=source so its integrity hashes match the bytes it writes.
+  // Only our installer and pinned packaging library run; vendor JS is never loaded.
   const script = `import fs from 'node:fs'; import {packPreservingUnpacked} from ${JSON.stringify(import.meta.url)}; await packPreservingUnpacked(process.argv[1], process.argv[2], JSON.parse(fs.readFileSync(process.argv[3], 'utf8')));`;
   await promisify(execFile)(process.execPath, ['--input-type=module', '--eval', script, source, candidate, plan], {
     cwd: source,
@@ -455,7 +455,7 @@ function verifyArchiveIntegrity(archive) {
     }
   }
 }
-
+// Current archive, unpacked files, binary, and state participate in one reversible swap.
 function swapTransaction(resources, staging, replacements, rename = fs.renameSync) {
   const steps = [];
   try {
@@ -533,7 +533,7 @@ export async function deploy(options = {}, operations = {}) {
           }
         }
       } catch {
-
+        /* ignore */
       }
     }
     if (options.restore) {
@@ -543,8 +543,8 @@ export async function deploy(options = {}, operations = {}) {
         fail('BACKUP_INVALID', 'The prepared restore does not match the original backup.');
     } else {
       const source = path.join(staging, 'source');
-
-
+      // Preserve the installed vendor runtime. Our modules live in their own
+      // directory; only three validated integration hooks change vendor files.
       asar.extractAll(info.vendorFiles.archive, source);
       for (const file of REQUIRED_BUILD_FILES) {
         const target = path.join(source, 'dist', 'modelPatch', file);
@@ -572,8 +572,8 @@ export async function deploy(options = {}, operations = {}) {
       const marker = path.join(source, 'antigravity-proxy.json');
       if (info.plan.mode === 'fixed') fs.writeFileSync(marker, JSON.stringify({ requiredPort: 50999 }) + '\n');
       if (info.plan.mode === 'dynamic' && exists(marker)) removeOwned(source, marker);
-
-
+      // Rebuild referenced unpacked entries cleanly; then preserve unlisted vendor
+      // extras without overwriting newly generated files or following live links.
       await (operations.pack || packCandidate)(source, candidate.archive, info.entries);
       copyMissingUnpacked(info.vendorFiles.unpacked, candidate.unpacked);
       fs.chmodSync(candidate.archive, fs.statSync(files.archive).mode & 0o777);
@@ -624,7 +624,7 @@ export async function deploy(options = {}, operations = {}) {
       { target: files.archive, candidate: candidate.archive },
       { target: files.unpacked, candidate: candidate.unpacked },
     ];
-
+    // Fingerprint/backup the binary always; replace it only for an explicit patch or restore.
     if (options.restore || info.plan?.bytes) replacements.push({ target: files.binary, candidate: candidate.binary });
     replacements.push({ target: path.join(meta, 'state.json'), candidate: nextState ? stateCandidate : null });
     swapTransaction(resources, staging, replacements, operations.rename);

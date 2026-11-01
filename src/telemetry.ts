@@ -5,7 +5,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 type Wire = Map<number, number | Uint8Array>;
 export const CONVERSATION_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 
-
+// Decode only known metadata fields. Prompt strings and message payloads never leave SQLite.
 export function wireFields(input: Uint8Array): Wire {
   if (input.length > 8 * 1024 * 1024) throw new Error('Metadata record too large');
   const fields: Wire = new Map(); let offset = 0;
@@ -113,7 +113,7 @@ export class TelemetryReader {
         const times = new Map<number, number>(), activity: {time:number; type:number}[] = [];
         for (const step of db.prepare('SELECT idx, step_type, metadata FROM steps LIMIT 50000').all()) {
           let time = stat.mtimeMs;
-          try { const seconds = count(nested(wireFields(step.metadata), 1), 1); if (seconds >= 1577836800 && seconds < 4102444800) { time=seconds*1000; times.set(Number(step.idx), time); } } catch {  }
+          try { const seconds = count(nested(wireFields(step.metadata), 1), 1); if (seconds >= 1577836800 && seconds < 4102444800) { time=seconds*1000; times.set(Number(step.idx), time); } } catch { /* Older metadata stays undated. */ }
           if (step.step_type === 14 || step.step_type === 15) activity.push({time,type:step.step_type});
         }
         const calls: TokenCall[] = [];

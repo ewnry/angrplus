@@ -1,4 +1,8 @@
-
+/**
+ * Antigravity Local Proxy Server.
+ * Routes requests to Google, OpenAI, Anthropic, Ollama, and custom provider endpoints.
+ * Intercepts model lists to inject user-defined custom models.
+ */
 
 import * as http from 'http';
 import * as https from 'https';
@@ -7,7 +11,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import log from 'electron-log';
 
-
+// ─── Types ────────────────────────────────────────────────────────────────
 
 export interface CustomModel {
   name: string;
@@ -64,7 +68,7 @@ interface GeminiRequestBody {
   };
 }
 
-
+// ─── Imports ──────────────────────────────────────────────────────────────
 
 import { getMessageRevisionStore, rewriteRevisionHistory } from './messageRevisions';
 
@@ -73,7 +77,7 @@ let proxyPort = 0;
 let startingProxy: Promise<number> | null = null;
 let stoppingProxy: Promise<void> | null = null;
 
-
+// Shared cross-turn state
 import {
   modelToolCallIds,
   modelReasoningContent,
@@ -84,10 +88,10 @@ import {
   stopCleanupInterval,
 } from './proxy/shared';
 
-
+// Model configuration & capability detection
 import { detectModelCapabilities } from './proxy/modelUtils';
 
-
+// Custom request transport and model storage
 import { runCustomModelRequest, getProxyMetrics, stopCustomRequests } from './proxy/customRequest';
 import { selectGeminiFallback, recordGeminiFallback, resolveFallbackFiles } from './geminiFallback';
 import { readModelConfig, writeJsonAtomic } from './modelStore';
@@ -109,25 +113,25 @@ export function getLanguageServerPort(): number | undefined {
 
 function getAccountPool(): typeof import('./accountPool') | null {
   try {
-
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('./accountPool');
   } catch {
     return null;
   }
 }
 
-
-
+// Dynamic imports (stays require for Electron-specific modules)
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const cryptoStore = require('./cryptoStore');
 
-
+// ─── Model Helpers ────────────────────────────────────────────────────────
 
 function generateModelPlaceholderId(model: CustomModel): string {
   const input = (model.displayName || model.name || 'custom-model').toLowerCase();
   let hash = 5381;
   for (let i = 0; i < input.length; i++) {
     hash = (hash << 5) + hash + input.charCodeAt(i);
-    hash = hash & hash;
+    hash = hash & hash; // Force 32-bit integer
   }
   const placeholderNum = 400 + (Math.abs(hash) % 200);
   return `MODEL_PLACEHOLDER_M${placeholderNum}`;
@@ -149,11 +153,11 @@ function toSlug(model: CustomModel): string {
   );
 }
 
-
+// ─── Model Loading ────────────────────────────────────────────────────────
 
 function loadCustomModels(): CustomModel[] {
   const filePath = getCustomModelsPath();
-
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { validateCustomModel } = require('./schemaValidator');
 
   if (!fs.existsSync(filePath)) {
@@ -203,7 +207,7 @@ function loadCustomModels(): CustomModel[] {
   try {
     const models = readModelConfig(filePath) as CustomModel[];
 
-
+    // Auto-migration check
     const unprotected = (value: unknown) => typeof value === 'string' && value && value !== 'none' && !/^(enc:|fallback:|local-gcm:)/.test(value);
     const needsMigration = models.some((m) =>
       (!m.encrypted && unprotected(m.apiKey)) ||
@@ -231,7 +235,7 @@ function loadCustomModels(): CustomModel[] {
       try {
         writeJsonAtomic(filePath, { models: encryptedModels });
         log.info('[Proxy] Successfully migrated custom_models.json to encrypted format.');
-
+        // Continue through validation and enabled filtering below.
       } catch (err) {
         log.error('[Proxy] Failed to write encrypted custom_models.json during migration:', err);
       }
@@ -273,7 +277,7 @@ function loadCustomModels(): CustomModel[] {
       }
     }
 
-
+    // Validate all models
     const validModels: CustomModel[] = [];
     for (let i = 0; i < decrypted.length; i++) {
       const validation = validateCustomModel(decrypted[i]) as { valid: boolean; error?: string };
@@ -310,29 +314,29 @@ export function recordGenerationStart(): void {
 export function recordGenerationEnd(info: { hasText: boolean; hasFunctionCall: boolean; wasAborted: boolean }): void {
   activeGenerations = Math.max(0, activeGenerations - 1);
 
-
+  // If the request was aborted (client closed, user stopped, error) -> do not chime!
   if (info.wasAborted) {
     log.info('[Proxy] Generation was aborted or client closed; suppressing completion chime.');
     return;
   }
 
-
+  // If the response called a function/tool -> this is an intermediate action, not final answer!
   if (info.hasFunctionCall) {
     log.info('[Proxy] Generation contained functionCall (intermediate tool step); suppressing completion chime.');
     return;
   }
 
-
+  // If no text was produced -> ignore
   if (!info.hasText) {
     return;
   }
 
-
+  // If other requests are still streaming -> wait
   if (activeGenerations > 0) {
     return;
   }
 
-
+  // Settle timer (1200ms): ensure no immediate subsequent requests start
   if (generationSettleTimer) clearTimeout(generationSettleTimer);
   generationSettleTimer = setTimeout(() => {
     generationSettleTimer = null;
@@ -357,7 +361,7 @@ export function notifyGenerationComplete(): void {
       }
     }
   } catch {
-
+    /* ignore in tests/headless */
   }
 }
 
@@ -366,7 +370,7 @@ export function isGoogleQuotaError(status: number, body: string): boolean {
   return status === 429 || (status === 403 && /RESOURCE_EXHAUSTED|quota.?exceed|rate.?limit/i.test(body));
 }
 
-
+// ─── Google Proxy ─────────────────────────────────────────────────────────
 
 async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse, reqBody: Buffer): Promise<void> {
   const isCloudCodeUrl = req.url!.includes('v1internal') || req.url!.includes('daily-cloudcode');
@@ -389,7 +393,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
     delete baseHeaders['accept-encoding'];
   }
 
-
+  // Extract requested model name if present
   let requestedModelName: string | undefined;
   try {
     if (reqBody && reqBody.length > 0) {
@@ -397,14 +401,14 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
       requestedModelName = parsed.model || parsed.modelId || parsed.model_id || parsed.request?.model || parsed.request?.modelId;
     }
   } catch {
-
+    /* ignore */
   }
   if (!requestedModelName && req.url) {
     const urlMatch = req.url.match(/models\/([^:]+)/);
     if (urlMatch) requestedModelName = urlMatch[1];
   }
 
-
+  // Multi-Account Pool & Hot-Swap handling
   const accountPool = getAccountPool();
   const poolCfg = accountPool ? accountPool.loadPoolConfig() : null;
   let poolAccount: import('./accountPool').PooledAccount | null = null;
@@ -480,7 +484,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
       const resetStreamTimeout = () => { if (!proxyReq.destroyed) proxyReq.setTimeout(streamTimeoutMs); };
       resetStreamTimeout();
 
-
+      // Keep the error response until we know whether a standby account is usable.
       const effectiveTargetAcc = targetAcc || (poolCfg ? (poolCfg.accounts.find((a) => a.id === poolCfg.activeAccountId) || poolCfg.accounts[0]) : null);
       const canRotate = !!(effectiveTargetAcc && accountPool && poolCfg?.autoHotswap && poolCfg.accounts.length > 1 && attempt < MAX_HOTSWAP_ATTEMPTS);
       if (isGeneration && (canRotate || fallbackModel) &&
@@ -593,7 +597,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
                 hasText = true;
               }
             } catch {
-
+              /* ignore */
             }
           });
 
@@ -642,7 +646,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
   doRequest(poolAccount);
 }
 
-
+// ─── File Data Resolver ────────────────────────────────────────────────────
 
 async function resolveFileData(body: GeminiRequestBody, reqHeaders: Record<string, string | string[] | undefined>): Promise<void> {
   const contents = body.contents;
@@ -686,16 +690,16 @@ function downloadFileContent(url: string, authHeader: string): Promise<string> {
   });
 }
 
-
+// ─── Custom Model Request Handler ─────────────────────────────────────────
 
 function handleCustomModelRequest(res: http.ServerResponse, model: CustomModel, body: GeminiRequestBody, isStream: boolean, cloudEnvelope = true): void {
   void runCustomModelRequest(res, model, body as import('./proxy/requestOptions').GeminiBody, isStream, loadCustomModels(), cloudEnvelope);
 }
 
-
+// ─── Protobuf Utilities ────────────────────────────────────────────────────
 
 interface ProtoField {
-  tag: number;
+  tag: number;        // full tag (field_number << 3 | wire_type)
   wireType: number;
   fieldNum: number;
   value: number | Buffer | ProtoField[];
@@ -792,7 +796,7 @@ function findModelEntryFieldTag(fields: ProtoField[]): number | null {
     }
   }
   if (bestTag !== null && bestCount >= 2) {
-
+    // Verify it has nested messages
     const sample = fields.find((f) => f.tag === bestTag && Array.isArray(f.value));
     if (sample) return bestTag;
   }
@@ -840,7 +844,7 @@ function encodeModelEntryForGetModels(
   return encodeProtoBuf(fields);
 }
 
-
+// ─── GetAvailableModels Proxy Handler ───────────────────────────────────────
 
 function handleGetAvailableModelsProxy(
   res: http.ServerResponse,
@@ -966,7 +970,7 @@ function handleGetAvailableModelsProxy(
   lsReq.end();
 }
 
-
+// ─── Main Request Handler ─────────────────────────────────────────────────
 
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
   if (!guardLoopbackRequest(req, res, getLanguageServerPort())) {
@@ -975,9 +979,9 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
   let requestUrl: URL;
   try {
     req.url = (req.url || '/').replace(/^.*\/dummy_path_padding/, '');
-
+    // Strip binary patch padding (from LS hostname replacement)
     req.url = req.url.replace(/\/v1internal\/x{7}/, '');
-
+    // This listener routes fixed upstreams; authority-form targets must never replace them.
     if (!req.url.startsWith('/') || /^[\\/]{2}/.test(req.url)) throw new Error('Invalid target');
     requestUrl = new URL(req.url, 'http://localhost');
   } catch {
@@ -986,7 +990,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     return;
   }
 
-
+  // Health check
   if (req.method === 'GET' && (req.url === '/health' || req.url === '/healthz')) {
     const memUsage = process.memoryUsage();
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1018,8 +1022,8 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     return;
   }
 
-
-  const MAX_BODY_SIZE = 10 * 1024 * 1024;
+  // P0-4: Enforce maximum request body size to prevent memory exhaustion DoS
+  const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
   let bodyLength = 0;
   let bodyRejected = false;
 
@@ -1064,7 +1068,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
 
     log.info(`[Proxy] Request: ${req.method} ${req.url}`);
 
-
+    // 0. Intercept GetAvailableModels (redirected from Electron webRequest)
     if (req.url!.startsWith('/GetAvailableModels')) {
       const gavParsed = new URL(req.url!, 'http://127.0.0.1');
       const lsUrl = gavParsed.searchParams.get('ls');
@@ -1077,7 +1081,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       return;
     }
 
-
+    // 0.5. Intercept /v1internal:retrieveUserQuotaSummary for Combined Pool Quota
     if (req.url!.includes('/v1internal:retrieveUserQuotaSummary')) {
       const accountPool = getAccountPool();
       const config = accountPool ? accountPool.loadPoolConfig() : null;
@@ -1100,7 +1104,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       }
     }
 
-
+    // 1. Intercept /v1internal:fetchAvailableModels
     if (req.url!.includes('/v1internal:fetchAvailableModels')) {
       log.info('[Proxy] Intercepting fetchAvailableModels request');
 
@@ -1120,7 +1124,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       };
 
       const googleReq = https.request(parsedUrl, fwdOptions, (googleRes) => {
-
+        // P0-5: Timeout for fetchAvailableModels forward request (30s)
         googleReq.setTimeout(30_000, () => {
           log.error('[Proxy] fetchAvailableModels forward request timed out');
           googleReq.destroy();
@@ -1274,7 +1278,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
               googleJson.models = modelsMap;
             }
 
-
+            // Inject custom model slugs into agentModelSorts
             const customSlugs = customModels.map((m) => m._slug).filter(Boolean) as string[];
             if (customSlugs.length > 0) {
               if (googleJson.agentModelSorts && Array.isArray(googleJson.agentModelSorts)) {
@@ -1343,7 +1347,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       return;
     }
 
-
+    // 2. Intercept /v1beta/models or /v1/models list request
     if (req.method === 'GET' && (req.url!.endsWith('/models') || req.url!.includes('/models?'))) {
       log.info('[Proxy] Intercepting models list request');
 
@@ -1359,7 +1363,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       const mdlOptions: https.RequestOptions = { method: 'GET', headers: mdlHeaders as Record<string, string> };
 
       const googleReq = https.request(parsedUrl, mdlOptions, (googleRes) => {
-
+        // P0-5: Timeout for models list forward request (30s)
         googleReq.setTimeout(30_000, () => {
           log.error('[Proxy] Models list forward request timed out');
           googleReq.destroy();
@@ -1444,7 +1448,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       return;
     }
 
-
+    // 3. Intercept Cloud Code generation stream or non-stream requests
     const isCloudCodeStream =
       req.url!.includes('/v1internal:streamGenerateContent') || req.url!.includes('/v1internal:generateContent');
     if (req.method === 'POST' && isCloudCodeStream) {
@@ -1469,7 +1473,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
             const actualGeminiBody = { ...(reqJson.request || reqJson) as GeminiRequestBody };
             if (typeof reqJson.sessionId === 'string') actualGeminiBody.sessionId = reqJson.sessionId;
             if (typeof reqJson.conversationId === 'string') actualGeminiBody.conversationId = reqJson.conversationId;
-
+            // Resolve fileData URIs then route to translator
             resolveFileData(actualGeminiBody, req.headers as Record<string, string | string[] | undefined>).then(() => {
               const accountPool = getAccountPool();
               const poolCfg = accountPool ? accountPool.loadPoolConfig() : null;
@@ -1486,7 +1490,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       }
     }
 
-
+    // 4. Intercept standard generateContent / streamGenerateContent request
     const generateMatch = req.url!.match(/\/(?:v1|v1beta)\/(models\/[^:]+):generateContent/);
     const streamMatch = req.url!.match(/\/(?:v1|v1beta)\/(models\/[^:]+):streamGenerateContent/);
 
@@ -1533,19 +1537,19 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       }
     }
 
-
+    // 5. Fallback: transparent proxy to Google
     void proxyToGoogle(req, res, fullBody);
   });
 }
 
-
+// ─── Server Start/Stop ────────────────────────────────────────────────────
 
 export async function startProxy(): Promise<number> {
   if (stoppingProxy) await stoppingProxy;
   if (server?.listening && proxyPort) return proxyPort;
   if (startingProxy) return startingProxy;
 
-
+  // Auto-capture native Antigravity session if pool is empty
   try {
     const accountPool = getAccountPool();
     if (accountPool) {
@@ -1557,7 +1561,7 @@ export async function startProxy(): Promise<number> {
       }
     }
   } catch {
-
+    /* ignore */
   }
 
   const requiredPort = getRequiredProxyPort(app.getAppPath());
@@ -1586,12 +1590,12 @@ export async function startProxy(): Promise<number> {
 export function stopProxy(): Promise<void> {
   if (stoppingProxy) return stoppingProxy;
   stoppingProxy = (async () => {
-
+    // A shutdown requested during startup must also close the listener once ready.
     if (startingProxy) {
       try {
         await startingProxy;
       } catch {
-
+        // A failed start already cleared its server and cleanup interval.
       }
     }
     stopCleanupInterval();

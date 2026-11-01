@@ -1,4 +1,7 @@
-
+/**
+ * OpenAI/Ollama provider translator.
+ * Handles Gemini ↔ OpenAI/Ollama request/response mapping and streaming chunks.
+ */
 import * as path from 'path';
 
 import log from 'electron-log';
@@ -21,7 +24,7 @@ import {
   StreamContext,
 } from '../shared';
 
-
+// ─── Types ────────────────────────────────────────────────────────────────
 
 interface GeminiTool {
   functionDeclarations?: GeminiFunctionDeclaration[];
@@ -170,7 +173,7 @@ interface DSMLParsedResult {
   cleanText: string;
 }
 
-
+// ─── REQUEST: Gemini → OpenAI ──────────────────────────────────────────────
 
 function mapGeminiToolsToOpenAI(geminiTools: GeminiTool[]): OpenAITool[] {
   if (!geminiTools || !Array.isArray(geminiTools)) return [];
@@ -300,7 +303,7 @@ export function mapGeminiToOpenAI(
                 partsContent.push(p.text);
               } else if (p.fileData) {
                 const fd = p.fileData as { mimeType: string; fileUri: string };
-
+                // Try to read local files directly
                 try {
                   const url = new URL(fd.fileUri);
                   if (url.protocol === 'file:') {
@@ -334,10 +337,10 @@ export function mapGeminiToOpenAI(
       }
     }
   }
-
+  // Keep feedback after all consecutive tool results, including split parallel responses.
   flushToolResponseTexts();
 
-
+  // Inject reasoning_content into assistant messages missing it
   let lastAssistantIdx = -1;
   for (let i = 0; i < messages.length; i++) {
     if (messages[i].role === 'assistant') lastAssistantIdx = i;
@@ -349,11 +352,11 @@ export function mapGeminiToOpenAI(
     }
   }
 
-
-
-
-
-
+  // Models requiring max_completion_tokens instead of max_tokens:
+  // - Legacy o-series: o1, o3, o4-mini (any format: o1, o1-mini, openai/o3, etc.)
+  // - Legacy gpt-4.1 series: gpt-4.1, 4.1-mini, gpt-4.1-nano (any prefix)
+  // - GPT-5.x thinking/pro: gpt-5.4-thinking, gpt-5.5-pro, etc.
+  //   (OpenAI unified under GPT-5.x in Feb 2026, deprecated all previous models)
   const lowerName = modelName.toLowerCase();
   const isThinkingModel = /thinking|reasoning/i.test(lowerName);
   const isReasoningModel = /(^|\/|^openai\/)(o1|o3|o4)(-|$|mini|pro)/i.test(lowerName);
@@ -379,7 +382,7 @@ export function mapGeminiToOpenAI(
   return payload;
 }
 
-
+// ─── RESPONSE: OpenAI → Gemini ─────────────────────────────────────────────
 
 function parseDSMLToolCalls(text: string): DSMLParsedResult | null {
   try {
@@ -400,7 +403,7 @@ function parseDSMLToolCalls(text: string): DSMLParsedResult | null {
           try {
             paramValue = JSON.parse(paramValue as string);
           } catch (e) {
-            log.debug('[OpenAI] DSML param parse fallback:', (e as Error).message);
+            log.debug('[OpenAI] DSML param parse fallback:', (e as Error).message); /* keep as string */
           }
         }
         args[paramName] = paramValue;
@@ -504,7 +507,7 @@ export function mapOpenAIToGemini(
   };
 }
 
-
+// ─── STREAM CHUNK: OpenAI → Gemini ────────────────────────────────────────
 
 export function mapOpenAIChunkToGemini(
   chunk: OpenAIResponse,
@@ -554,7 +557,7 @@ export function mapOpenAIChunkToGemini(
 
   const finishReason = choice.finish_reason;
   if (finishReason === 'stop' || finishReason === 'length') {
-
+    // Check for pending native tool_calls before closing stream
     const pendingToolCalls = Object.values(context.toolCalls).filter((tc) => tc.name && tc.arguments);
     if (pendingToolCalls.length > 0) {
       const parts: GeminiPart[] = pendingToolCalls.map((tc) => {
@@ -584,7 +587,7 @@ export function mapOpenAIChunkToGemini(
       activeStreamContexts.delete(streamId);
       return { content: { parts, role: 'model' }, finishReason: 'TOOL_CALL', index: 0 };
     }
-
+    // Check for accumulated DSML tool calls
     if (context.accumulatedText) {
       const dsml2 = parseDSMLToolCalls(context.accumulatedText);
       if (dsml2 && dsml2.functionCalls.length > 0) {
@@ -602,7 +605,7 @@ export function mapOpenAIChunkToGemini(
     return { content: { parts: text ? [{ text }] : [], role: 'model' }, finishReason: 'STOP', index: 0 };
   }
 
-
+  // Only emit tool calls when finishReason signals completion (args are fully accumulated)
   if (finishReason === 'tool_calls') {
     const parts: GeminiPart[] = Object.values(context.toolCalls).map((tc) => {
       let args: ToolCallArgs = {};

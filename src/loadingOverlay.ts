@@ -1,6 +1,13 @@
 import { BrowserWindow, WebContentsView, type BrowserWindowInstance } from 'electron';
 
-
+/**
+ * Generates the HTML content for the initial loading screen overlay.
+ * This is injected into a WebContentsView and shown to the user before
+ * the main application bundle finishes loading.
+ *
+ * @param foregroundColor - The text and loader animation color (hex or CSS color string).
+ * @param backgroundColor - The background color of the loading view.
+ */
 function getLoadingHtml(foregroundColor: string, backgroundColor: string): string {
   return `
 <!DOCTYPE html>
@@ -60,7 +67,10 @@ function getLoadingHtml(foregroundColor: string, backgroundColor: string): strin
   `;
 }
 
-
+/**
+ * Attaches a temporary WebContentsView overlay that shows a loading animation.
+ * It is automatically removed when the window's main content finishes loading.
+ */
 export function attachLoadingOverlay(
   win: BrowserWindowInstance,
   foregroundColor: string,
@@ -85,7 +95,7 @@ export function attachLoadingOverlay(
     try {
       win.contentView.removeChildView(view);
     } catch (_) {
-
+      // In case window was closed quickly
     }
     win.off('resize', updateBounds);
   });

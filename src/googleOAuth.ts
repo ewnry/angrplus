@@ -1,4 +1,4 @@
-
+/** Explicit Google desktop OAuth login. No bundled client credentials or automatic login. */
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -35,7 +35,7 @@ interface TokenResponse {
   id_token?: string;
 }
 export interface GoogleOAuthDependencies {
-
+  /** Dependency injection is for local protocol tests; production always uses Google's fixed token URL. */
   exchangeToken?: (parameters: URLSearchParams, signal: AbortSignal) => Promise<TokenResponse>;
   now?: () => number;
 }
@@ -135,7 +135,7 @@ function exchangeToken(parameters: URLSearchParams, signal: AbortSignal): Promis
   });
 }
 
-
+/** Returns credentials to the main process only. IPC callers must store them before returning a redacted account. */
 export async function loginGoogleAccount(
   options: GoogleLoginOptions,
   openExternal: (url: string) => Promise<unknown>,
@@ -269,7 +269,7 @@ export async function loginGoogleAccount(
                 if (typeof payload.picture === 'string') picture = payload.picture;
               }
             } catch {
-
+              /* ignore jwt decode error */
             }
           }
 

@@ -1,4 +1,4 @@
-
+/** Wire-format dispatch, independent from provider branding and authentication. */
 import * as openai from './translators/openai';
 import * as anthropic from './translators/anthropic';
 import * as google from './translators/google';

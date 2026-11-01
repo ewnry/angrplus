@@ -1,4 +1,15 @@
-
+/**
+ * Schema Validator Module for Antigravity Proxy
+ *
+ * Validates API response schemas and data integrity for:
+ * - Gemini GenerateContentResponse format
+ * - Custom model configuration objects
+ * - Streaming chunk structure
+ *
+ * This module provides runtime validation to catch malformed
+ * responses before they reach the frontend, improving stability
+ * and preventing cryptic UI errors.
+ */
 
 import { PROVIDERS } from './providers';
 
@@ -7,7 +18,9 @@ interface ValidationResult {
   error?: string;
 }
 
-
+/**
+ * Validates a Gemini candidate object structure.
+ */
 export function validateCandidate(candidate: unknown): ValidationResult {
   if (!candidate || typeof candidate !== 'object') {
     return { valid: false, error: 'Candidate is null or not an object' };
@@ -29,7 +42,9 @@ export function validateCandidate(candidate: unknown): ValidationResult {
   return { valid: true };
 }
 
-
+/**
+ * Validates a Gemini GenerateContentResponse structure (top-level).
+ */
 export function validateGenerateContentResponse(response: unknown): ValidationResult {
   if (!response || typeof response !== 'object') {
     return { valid: false, error: 'Response is null or not an object' };
@@ -50,7 +65,9 @@ export function validateGenerateContentResponse(response: unknown): ValidationRe
   return { valid: true };
 }
 
-
+/**
+ * Validates a Cloud Code envelope (wrapper with response, traceId, metadata).
+ */
 export function validateCloudCodeEnvelope(envelope: unknown): ValidationResult {
   if (!envelope || typeof envelope !== 'object') {
     return { valid: false, error: 'Envelope is null or not an object' };
@@ -62,7 +79,9 @@ export function validateCloudCodeEnvelope(envelope: unknown): ValidationResult {
   return validateGenerateContentResponse(e.response);
 }
 
-
+/**
+ * Validates a custom model configuration object.
+ */
 export function validateCustomModel(model: unknown): ValidationResult {
   if (!model || typeof model !== 'object') {
     return { valid: false, error: 'Model is null or not an object' };
@@ -77,20 +96,20 @@ export function validateCustomModel(model: unknown): ValidationResult {
   }
 
   const name = m.name as string;
-
+  // Validate model name format: should start with "models/" or be a valid path
   if (!name.startsWith('models/') && !name.includes('/')) {
     return { valid: false, error: 'Model name must start with "models/"' };
   }
 
   const provider = m.provider as string;
-
+  // Validate provider is one of the supported types
   const validProviders = PROVIDERS.map((provider) => provider.id);
   if (!validProviders.includes(provider)) {
     return { valid: false, error: `Unsupported provider: ${provider}. Must be one of: ${validProviders.join(', ')}` };
   }
 
   const apiUrl = m.apiUrl as string;
-
+  // Validate API URL format
   try {
     const url = new URL(apiUrl);
     if (!['http:', 'https:'].includes(url.protocol)) {
@@ -103,7 +122,7 @@ export function validateCustomModel(model: unknown): ValidationResult {
     return { valid: false, error: `Invalid API URL: ${(e as Error).message}` };
   }
 
-
+  // Validate optional fields
   if (m.externalModelName && typeof m.externalModelName !== 'string') {
     return { valid: false, error: 'externalModelName must be a string' };
   }
@@ -193,7 +212,9 @@ export function validateCustomModel(model: unknown): ValidationResult {
   return { valid: true };
 }
 
-
+/**
+ * Validates an array of custom model configurations.
+ */
 export function validateCustomModels(models: unknown): ValidationResult {
   if (!Array.isArray(models)) {
     return { valid: false, error: 'Models must be an array' };
@@ -207,7 +228,9 @@ export function validateCustomModels(models: unknown): ValidationResult {
   return { valid: true };
 }
 
-
+/**
+ * Validates a Gemini request body (contents, generationConfig, tools, etc.)
+ */
 export function validateGenerateContentRequest(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') {
     return { valid: false, error: 'Body is null or not an object' };
@@ -228,7 +251,9 @@ export function validateGenerateContentRequest(body: unknown): ValidationResult 
   return { valid: true };
 }
 
-
+/**
+ * Validates an OpenAI-style streaming chunk.
+ */
 export function validateOpenAiChunk(chunk: unknown): ValidationResult {
   if (!chunk || typeof chunk !== 'object') {
     return { valid: false, error: 'Chunk is null or not an object' };
@@ -240,7 +265,9 @@ export function validateOpenAiChunk(chunk: unknown): ValidationResult {
   return { valid: true };
 }
 
-
+/**
+ * Validates an Anthropic streaming event.
+ */
 export function validateAnthropicEvent(event: unknown): ValidationResult {
   if (!event || typeof event !== 'object') {
     return { valid: false, error: 'Event is null or not an object' };

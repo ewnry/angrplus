@@ -1,4 +1,4 @@
-
+// Build a narrowly scoped patch without evaluating any vendor or build code.
 import { Script } from 'node:vm';
 import ts from 'typescript';
 
@@ -107,7 +107,7 @@ function patchMain(bytes) {
   let statement = ready;
   while (statement.parent && !ts.isSourceFile(statement.parent)) statement = statement.parent;
   if (!ts.isExpressionStatement(statement)) unsupported(file, 'startup hook must be a top-level expression');
-
+  // Do not inject into a callback/function declaration merely containing whenReady().
   for (let node = ready.parent; node !== statement; node = node.parent) {
     if (ts.isFunctionLike(node)) unsupported(file, 'startup hook is nested inside a function');
   }
@@ -270,6 +270,11 @@ function patchPreload(vendorBytes, customBytes) {
   ]);
 }
 
+/**
+ * Return only the three modified vendor files. Callbacks synchronously return
+ * Buffer/string contents. Vendor paths are archive-relative; build paths are
+ * relative to dist. The caller separately copies its build into dist/modelPatch.
+ */
 export function planRuntimePatch(readVendorFile, readBuildFile) {
   return new Map([
     ['dist/main.js', patchMain(readInput(readVendorFile, 'dist/main.js'))],

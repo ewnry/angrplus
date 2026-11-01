@@ -112,7 +112,7 @@ export function buildFallbackChain(primary: CustomModel, allModels: CustomModel[
   return chain;
 }
 
-
+/** The sole retry/fallback owner; nothing is retried after any model output was received. */
 export async function runCustomModelRequest(
   res: http.ServerResponse,
   primary: CustomModel,
@@ -157,7 +157,7 @@ export async function runCustomModelRequest(
         failure = new UpstreamError('Request retry budget exhausted.', 504, false);
         break;
       }
-
+      // Include transport configuration so editing a broken endpoint does not retain its open circuit.
       const circuitKey = JSON.stringify([model.name, model.apiUrl, model.apiFormat || model.provider]);
       if (!circuits.acquire(circuitKey, model.circuitBreaker)) {
         counts.circuitSkips += 1;
@@ -241,7 +241,7 @@ export async function runCustomModelRequest(
             if (model.gateway) {
               const identity = originalBody.conversationId || originalBody.sessionId;
               if (typeof identity === 'string' && identity.trim()) {
-
+                // Stable across turns and safe as a header, even when callers use Unicode/control characters.
                 headers['x-antigravity-conversation-id'] = createHash('sha256').update(identity).digest('hex');
               }
             }
@@ -351,7 +351,7 @@ export async function runCustomModelRequest(
               if (mapped) {
                 if (mapped.content?.parts?.length) emitted = true;
                 if (mapped.finishReason && mapped.finishReason !== 'OTHER') finalReason = true;
-
+                // A role-only or empty completion must not commit headers and prevent fallback.
                 if (emitted) writeCandidate(mapped);
               }
             };
@@ -404,7 +404,7 @@ export async function runCustomModelRequest(
               upstreamOutput = true;
               for (const tool of parsed.choices[0].message.tool_calls) validateToolArguments(tool.function?.arguments);
             }
-
+            // Some compatible endpoints return a complete JSON response even when stream=true.
             const mapped = registry.translateResponse(model.provider, parsed, stateKey, format, toolSchemas) as {
               candidates?: unknown[];
             };
@@ -442,7 +442,7 @@ export async function runCustomModelRequest(
           }
           if (failure.retryable && attempt < retries && Date.now() < deadline) {
             counts.retries += 1;
-
+            // Tear down the old attempt before waiting; timeout and error cannot each schedule a retry.
             request?.destroy();
             if (totalTimer) clearTimeout(totalTimer);
             signal.removeEventListener('abort', abort);

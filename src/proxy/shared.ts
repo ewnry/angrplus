@@ -1,6 +1,9 @@
+/**
+ * Shared state module for proxy orchestration.
+ * Extracted from proxy.js to decouple translators from main orchestration.
+ */
 
-
-
+// ─── Types ────────────────────────────────────────────────────────────────
 
 export interface StreamContext {
   accumulatedText: string;
@@ -22,21 +25,21 @@ export interface TranslatedCallInfo {
   cwd: string;
 }
 
+// ─── State ────────────────────────────────────────────────────────────────
 
-
-
+/** modelName → { "functionName": "original_tool_call_id" } */
 export const modelToolCallIds = new Map<string, Record<string, string>>();
 
-
+/** modelName → preserved reasoning_content from previous turn */
 export const modelReasoningContent = new Map<string, string>();
 
-
+/** streamId → { accumulatedText, accumulatedReasoning, toolCalls } */
 export const activeStreamContexts = new Map<string, StreamContext>();
 
-
+/** toolCallId → { originalName, translatedName, cmd, cwd } */
 export const translatedToolCalls = new Map<string, TranslatedCallInfo>();
 
-
+/** State entry timestamps for periodic cleanup */
 export const stateTimestamps: StateTimestamps = {
   streamCtx: new Map(),
   toolCallIds: new Map(),
@@ -44,22 +47,22 @@ export const stateTimestamps: StateTimestamps = {
   reasoning: new Map(),
 };
 
-
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
 export function touchStateTimestamp(map: Map<string, number>, key: string): void {
   map.set(key, Date.now());
 }
 
-
+// ─── Periodic Cleanup (managed lifecycle) ─────────────────────────────────
 
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startCleanupInterval(): void {
-  if (cleanupInterval) return;
+  if (cleanupInterval) return; // already running
   cleanupInterval = setInterval(() => {
     const now = Date.now();
-    const STREAM_TTL = 600_000;
-    const TOOL_TTL = 1_800_000;
+    const STREAM_TTL = 600_000; // 10 minutes for active stream contexts
+    const TOOL_TTL = 1_800_000; // 30 minutes for tool call IDs & reasoning
 
     for (const [key, ts] of stateTimestamps.streamCtx) {
       if (now - ts > STREAM_TTL) {
@@ -95,5 +98,5 @@ export function stopCleanupInterval(): void {
   }
 }
 
-
+// Auto-start for backward compatibility (will be replaced by proxy.ts lifecycle)
 startCleanupInterval();

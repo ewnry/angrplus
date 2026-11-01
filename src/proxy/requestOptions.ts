@@ -7,7 +7,7 @@ export interface GeminiBody {
   [key: string]: unknown;
 }
 
-
+/** Conservative estimate, not a tokenizer. Drop whole oldest turns, never half a tool exchange. */
 export function trimContext(body: GeminiBody, contextWindow?: number, maxOutputTokens = 0): GeminiBody {
   if (!contextWindow) return body;
   const budget = contextWindow - maxOutputTokens;

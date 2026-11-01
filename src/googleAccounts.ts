@@ -1,4 +1,4 @@
-
+/** Google Cloud Code account pools. OAuth applications and credentials are supplied by the user. */
 import * as http from 'http';
 import * as https from 'https';
 import { createHash } from 'crypto';
@@ -65,7 +65,7 @@ function accountKey(account: GoogleAccount): string {
     .digest('hex');
 }
 function poolKey(account: GoogleAccount): string {
-
+  // Account IDs survive refreshed/rotated credentials, so parallel models share one capacity limit.
   return createHash('sha256')
     .update(JSON.stringify([account.id, account.clientId]))
     .digest('hex');
@@ -144,7 +144,7 @@ async function postJson(
   });
 }
 
-
+/** Refresh requests are coalesced and cached. Endpoint override is restricted to localhost fixtures. */
 export async function refreshGoogleAccount(
   account: GoogleAccount,
   tokenEndpointOverride = 'https://oauth2.googleapis.com/token',
@@ -205,7 +205,7 @@ export async function refreshGoogleAccount(
   return refresh;
 }
 
-
+/** Explicit quota refresh; never infers subscription eligibility or fabricates an available quota. */
 export async function fetchGoogleQuota(
   account: GoogleAccount,
   baseURL = 'https://daily-cloudcode-pa.googleapis.com',
@@ -247,7 +247,7 @@ export async function fetchGoogleQuota(
   return snapshot;
 }
 
-
+/** Discover only the models returned for this authenticated account/project. */
 export async function fetchGoogleModels(
   account: GoogleAccount,
   baseURL = 'https://daily-cloudcode-pa.googleapis.com',
@@ -377,7 +377,7 @@ export function getGooglePoolStatus() {
   }));
 }
 
-
+/** Clear volatile account state after explicit account edits or sign-in. */
 export function resetGoogleAccountState(id?: string): void {
   for (const [key, state] of poolStates) if (!id || state.id === id) poolStates.delete(key);
   for (const [key, account] of tokenCache) if (!id || account.id === id) tokenCache.delete(key);

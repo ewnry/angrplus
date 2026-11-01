@@ -32,7 +32,7 @@ export async function diagnoseRuntime(input: {
   add('Gemini BYOK fallback','info',input.fallbackConfigured?'An eligible Gemini API-key fallback is selected.':'Disabled or no eligible Gemini API-key model is selected.');
   add('External access','info','Not tested. No provider requests or paid model calls were made.');
   add('Patch compatibility','info','Runtime is loaded. Full read-only preflight is available through installer --check.');
-
+  // Fixed allowlist: never export paths, URLs, account identities, prompts, headers or model secrets.
   return {success:true,report:{schema:1,checkedAt:new Date().toISOString(),application:input.appVersion,
     patch:input.patchVersion,platform:process.platform,architecture:process.arch,node:process.versions.node,
     healthy:!checks.some(check=>check.status==='warning'),checks}};

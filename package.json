@@ -1,23 +1,41 @@
 {
-  "name": "angrplus",
+  "name": "antigravity-plus",
   "productName": "Antigravity+",
   "version": "2.1.17",
-  "description": "Antigravity+ — Multi-account quota pool, seamless hot-swap & custom UI.",
+  "description": "Antigravity+ — Antigravity, but better. Multi-account quota pool, seamless hot-swap & custom models.",
+  "homepage": "https://t.me/unixmk",
+  "author": {
+    "name": "unixmk",
+    "url": "https://t.me/unixmk"
+  },
   "license": "Apache-2.0",
   "main": "dist/main.js",
   "engines": {
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "clean": "tsc --build --clean",
-    "patch": "node scripts/deploy.mjs",
+    "build": "npx tsc",
+    "dev": "npx tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "npx eslint src/**/*.ts",
+    "lint:fix": "npx eslint src/**/*.ts --fix",
+    "format": "npx prettier --write \"src/**/*.ts\"",
+    "format:check": "npx prettier --check \"src/**/*.ts\"",
+    "clean": "npx tsc --build --clean",
+    "gateway:install": "npm --prefix gateway ci --ignore-scripts",
+    "gateway:build": "npm --prefix gateway run build",
+    "gateway:test": "npm --prefix gateway test",
+    "gateway": "node scripts/gateway.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "doctor:repair": "node scripts/deploy.mjs",
     "patch:check": "node scripts/deploy.mjs --check",
     "patch:restore": "node scripts/deploy.mjs --restore",
     "build:installer": "node scripts/build-installer.mjs",
+    "test:integration": "node scripts/integration-smoke.mjs",
     "build:powershell": "node scripts/build-powershell-installer.mjs",
-    "build:unix": "node scripts/build-unix-installer.mjs"
+    "build:unix": "node scripts/build-unix-installer.mjs",
+    "prebuild": "node scripts/check-oauth-config.mjs"
   },
   "dependencies": {
     "chrome-devtools-mcp": "^0.23.0",
@@ -28,6 +46,13 @@
   "devDependencies": {
     "@electron/asar": "4.3.0",
     "@types/node": "^25.9.1",
-    "typescript": "^6.0.3"
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "eslint": "^9.33.0",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.6.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

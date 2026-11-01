@@ -1,6 +1,70 @@
-
+/** Custom-model UI, appended to the vendor preload. Sandboxed preloads require Electron only. */
 import { ipcRenderer, webFrame } from 'electron';
 
+function createCssEditor(value: string): { root: HTMLElement; input: HTMLTextAreaElement } {
+  const root = document.createElement('div'); root.className = 'agy-css-editor';
+  const toolbar = document.createElement('div'); toolbar.className = 'agy-css-editor-toolbar'; toolbar.textContent = 'CSS / .plus';
+  const frame = document.createElement('div'); frame.className = 'agy-css-editor-frame';
+  const pre = document.createElement('pre'); pre.setAttribute('aria-hidden', 'true'); const code = document.createElement('code'); pre.append(code);
+  const input = document.createElement('textarea'); input.value = value; input.spellcheck = false; input.setAttribute('aria-label', 'Custom CSS'); input.placeholder = '/* Write your CSS here */'; input.wrap = 'off';
+  const draw = () => {
+    const source = input.value; code.replaceChildren();
+    const token = /\/\*[\s\S]*?(?:\*\/|$)|(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|#[0-9a-fA-F]{3,8}\b|@[\w-]+|--[\w-]+|[a-zA-Z_-][\w-]*(?=\s*:)|\b\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%|s|ms)?\b/g;
+    let last = 0; for (const match of source.matchAll(token)) { const index = match.index || 0; code.append(document.createTextNode(source.slice(last, index))); const span = document.createElement('span'); const text = match[0]; span.className = text.startsWith('/*') ? 'comment' : /^["']/.test(text) ? 'string' : text.startsWith('#') || /^\d/.test(text) ? 'value' : text.startsWith('@') ? 'at' : 'property'; span.textContent = text; code.append(span); last = index + text.length; } code.append(document.createTextNode(source.slice(last) + '\n'));
+  };
+  input.addEventListener('input', draw); input.addEventListener('scroll', () => { pre.scrollTop = input.scrollTop; pre.scrollLeft = input.scrollLeft; });
+  input.addEventListener('keydown', event => { if (event.key !== 'Tab') return; event.preventDefault(); const start = input.selectionStart, end = input.selectionEnd; input.setRangeText('  ', start, end, 'end'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const styles = document.createElement('style'); styles.textContent = '.agy-css-editor{border:1px solid #424240;border-radius:9px;overflow:hidden;background:#191918}.agy-css-editor:focus-within{border-color:#77746d}.agy-css-editor-toolbar{padding:8px 12px;border-bottom:1px solid #343432;color:#a09e98;font:12px system-ui}.agy-css-editor-frame{position:relative;height:260px}.agy-css-editor pre,.agy-css-editor textarea{box-sizing:border-box;position:absolute;inset:0;width:100%;height:100%;margin:0;padding:12px;border:0;outline:0;white-space:pre;overflow:auto;tab-size:2;font:13px/1.6 Consolas,monospace;letter-spacing:normal}.agy-css-editor pre{pointer-events:none;color:#e3e1d9}.agy-css-editor textarea{resize:none;background:transparent;color:transparent;caret-color:#fff;-webkit-text-fill-color:transparent}.agy-css-editor textarea::selection{background:#4b6380aa}.agy-css-editor .comment{color:#8b9188}.agy-css-editor .string{color:#a5ce83}.agy-css-editor .value{color:#d8a074}.agy-css-editor .at{color:#c397d8}.agy-css-editor .property{color:#83b5dc}';
+  frame.append(pre, input); root.append(styles, toolbar, frame); draw(); return { root, input };
+}
+
+function compilePlusTheme(source: string): { css: string; script: string } {
+  const normalized = source.replace(/\r\n/g, '\n');
+  if (!normalized.startsWith('@plus 1\n')) return { css: source, script: '' };
+  const split = normalized.indexOf('\n@css\n'); if (split < 0) throw new Error('Missing @css section');
+  const header = normalized.slice(8, split); const css = normalized.slice(split + 6); const lines = header.split('\n'); const actions: Array<{selector:string; tag:string; className:string; text:string}> = []; let script = '', inScript = false, layout = '';
+  for (const line of lines) {
+    if (inScript) { if (line.trim() === '@end') { inScript = false; continue; } script += line + '\n'; continue; }
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    if (line.trim() === '@script') { inScript = true; continue; }
+    if (line.trim() === '@layout claude') { layout = 'claude'; continue; }
+    if (line.trim() === '@layout native') { layout = 'native'; continue; }
+    if (line.startsWith('@add ')) { const parts = line.slice(5).split('|').map(x => x.trim()); if (parts.length !== 4 || !parts[0] || !/^[a-z][a-z0-9-]*$/i.test(parts[1]) || !/^[a-z0-9_ -]*$/i.test(parts[2])) throw new Error('Use @add selector | tag | class | text'); actions.push({ selector:parts[0], tag:parts[1], className:parts[2], text:parts[3] }); continue; }
+    throw new Error('Unknown .plus directive: ' + line);
+  }
+  if (inScript) throw new Error('Missing @end after @script');
+  const setup = actions.length ? 'const __plusNodes=[]; for(const item of ' + JSON.stringify(actions) + '){const parent=document.querySelector(item.selector);if(parent){const node=document.createElement(item.tag);node.className=item.className;node.textContent=item.text;parent.append(node);__plusNodes.push(node)}}\n' : 'const __plusNodes=[];\n';
+  return { css: (layout ? '/* @antigravity-layout: ' + layout + ' */\n' : '') + css, script: setup + 'const __plusCleanup = (() => {\n' + script + '\n})();\nreturn () => { if (typeof __plusCleanup === "function") __plusCleanup(); for (const node of __plusNodes) node.remove(); };' };
+}
+
+type PlusPlugin = { id: string; name: string; code: string; enabled: boolean };
+type PlusCustomizations = { css: string; cssEnabled: boolean; themeScript?: string; themeSource?: string; plugins: PlusPlugin[] };
+let plusCustomizations: PlusCustomizations = { css: '', cssEnabled: false, plugins: [] };
+let plusPluginCleanup: Array<() => void> = [];
+function applyPlusCustomizations(): void {
+  for (const cleanup of plusPluginCleanup.splice(0)) { try { cleanup(); } catch (error) { console.error('[Antigravity+ plugin cleanup]', error); } }
+  document.getElementById('agy-user-custom-css')?.remove();
+  if (plusCustomizations.cssEnabled && plusCustomizations.css) { const style = document.createElement('style'); style.id = 'agy-user-custom-css'; style.textContent = plusCustomizations.css; document.head.append(style); }
+  if (plusCustomizations.cssEnabled && plusCustomizations.themeScript) {
+    try { const dispose = new Function('document', 'window', 'api', '"use strict";\n' + plusCustomizations.themeScript)(document, window, Object.freeze({ id: 'theme', log: (...args: any[]) => console.log('[Antigravity+ theme]', ...args), getModels: () => { const props = getModelFiberProps(); return { selected: props?.selectedModel?.label || '', options: (props?.modelOptions || []).map((x: any) => ({ label: String(x.label || ''), value: String(x.value), disabled: !!x.disabled })) }; }, selectModel: async (value: string) => { const props = getModelFiberProps(); const option = props?.modelOptions?.find((x: any) => String(x.value) === value && !x.disabled); return !!option && await props.setSelectedModel(option) !== false; }, setEffort: async (value: string) => { if (!['Low', 'Medium', 'High'].includes(value)) return false; return setAntigravityEffort(value as 'Low' | 'Medium' | 'High'); } })); if (typeof dispose === 'function') plusPluginCleanup.push(dispose); } catch (error) { console.error('[Antigravity+ theme]', error); }
+  }
+  for (const plugin of plusCustomizations.plugins) {
+    if (!plugin.enabled) continue;
+    try {
+      const dispose = new Function('document', 'window', 'api', '"use strict";\n' + plugin.code)(document, window, Object.freeze({ id: plugin.id, log: (...args: any[]) => console.log('[Antigravity+ ' + plugin.id + ']', ...args) }));
+      if (typeof dispose === 'function') plusPluginCleanup.push(dispose);
+    } catch (error) { console.error('[Antigravity+ plugin ' + plugin.id + ']', error); }
+  }
+}
+async function loadPlusCustomizations(): Promise<void> {
+  try { const data = await ipcRenderer.invoke('plus-customizations:read'); if (data && typeof data.css === 'string' && Array.isArray(data.plugins)) { plusCustomizations = data; applyPlusCustomizations(); } } catch (error) { console.error('[Antigravity+ customizations]', error); }
+}
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { void loadPlusCustomizations(); }, { once: true });
+  else void loadPlusCustomizations();
+}
+
+// Gemini Web Cowork: sandbox-safe renderer code (Electron is the only preload import).
 type CoworkInvoke = (channel: string, ...args: any[]) => Promise<any>;
 const coworkChevron = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m5 3 5 5-5 5"/></svg>';
 const coworkSendIcon = '<svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 16V4m-5 5 5-5 5 5"/></svg>';
@@ -19,7 +83,7 @@ function safeWebContent(html: string, fallback: string, owner = document): Docum
       if (!allowed.has(element.tagName)) { copy(child, target); continue; }
       const out = owner.createElement(element.tagName.toLowerCase());
       if (element.tagName === 'A') {
-        try { const url = new URL(element.getAttribute('href') || ''); if (['https:','http:'].includes(url.protocol)) { out.setAttribute('href',url.href); out.setAttribute('target','_blank'); out.setAttribute('rel','noopener noreferrer'); } } catch {  }
+        try { const url = new URL(element.getAttribute('href') || ''); if (['https:','http:'].includes(url.protocol)) { out.setAttribute('href',url.href); out.setAttribute('target','_blank'); out.setAttribute('rel','noopener noreferrer'); } } catch { /* invalid link */ }
       }
       copy(child, out); target.appendChild(out);
     }
@@ -1431,7 +1495,7 @@ body.agy-theme-claude [data-agy-message-revision] [data-quotable], body.agy-them
 body.agy-theme-claude .agy-revised-message-text { font-size:15px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; color:#e1e0d9; }
 `;
 
-
+// ─── State Management ──────────────────────────────────────────────────
 let agyCurrentMode: 'home' | 'code' = (typeof localStorage !== 'undefined' && localStorage.getItem('agy_claude_mode') === 'home') ? 'home' : 'code';
 let agyActiveEffort: 'Low' | 'Medium' | 'High' = 'High';
 let agyContextTab: 'context' | 'limits' = 'context';
@@ -1663,7 +1727,7 @@ function syncClaudeFilePreviewsInPage(): void {
         }
         throw new Error('Saved change is unavailable. Open the file for the full view.');
       }
-
+      // Native providers preserve remote-workspace routing and file-access policy.
       const providers=find(item.trigger,props=>{
         const map=props.value;return map&&typeof map.get==='function'&&typeof map.entries==='function'&&typeof map.get(uri.host)?.readFile==='function';
       },500)?.value;
@@ -1721,7 +1785,7 @@ function syncClaudeFilePreviewsInPage(): void {
       if(button.getAttribute('aria-expanded')==='true'&&button.nextElementSibling)root.setAttribute('data-agy-single-file','true');
     }else root.removeAttribute('data-agy-single-file');
   }
-
+  // A completed execution wrapper and its sole tool group must not repeat the same heading.
   for(const button of document.querySelectorAll<HTMLElement>('[data-testid="worked-for-collapsible"]')){
     const root=button.parentElement!;const groups=root.querySelectorAll<HTMLElement>('[data-testid="tool-group-collapsible"]');
     const own=button.querySelector<HTMLElement>('.agy-transcript-summary')?.dataset.agySignature;
@@ -1733,7 +1797,7 @@ function syncClaudeFilePreviewsInPage(): void {
   }
 }
 
-
+// Runs in the renderer's world: React's expando properties are isolated from preload.
 function nativeControlsInPage(action?: { value: string | number }): boolean {
   const page = window as any;
   const findProps = (selector: string, key: string): any => {
@@ -1768,7 +1832,7 @@ function nativeControlsInPage(action?: { value: string | number }): boolean {
           entries: Object.values(summaries?.summaries || {}).map((entry: any) => ({
             created: Number(entry.createdTime?.seconds || entry.trajectoryMetadata?.createdAt?.seconds || 0) * 1000,
             steps: Number.isFinite(Number(entry.stepCount)) ? Number(entry.stepCount) : 0,
-            project: entry.trajectoryMetadata?.projectId || entry.trajectoryMetadata?.workspaceUris?.[0] || '',
+            project: entry.trajectoryMetadata?.projectId || entry.trajectoryMetadata?.workspaceUris?.[0] || '', 
           })),
         };
         break;
@@ -1854,7 +1918,7 @@ function modelFamily(label: string): string {
   return label.replace(/\s*\((?:Low|Medium|High|Thinking|Auto)\)\s*$/i, '').trim();
 }
 
-
+// ─── React Fiber Integration for Silent Model & Effort Switching ───────
 function getModelFiberProps(): any {
   if (nativeControlState) return {
     ...nativeControlState,
@@ -2122,7 +2186,7 @@ function updateEnterBtnState(): void {
   if (!btn) return;
 
   const cancelTrigger = inputBox.querySelector('button[data-tooltip-id="input-send-button-cancel-tooltip"]') as HTMLElement | null;
-
+  // The native cancel button is hidden by our theme, even during generation.
   const isGenerating = cancelTrigger !== null;
 
   if (isGenerating) {
@@ -2150,7 +2214,7 @@ function updateEnterBtnState(): void {
   if (btn.classList.contains('multiline') !== isMulti) btn.classList.toggle('multiline', isMulti);
 }
 
-
+// ─── Attach Popover Menu (PLUS BUTTON) ─────────────────────────────────
 function openClaudePlusPopover(): void {
   let pop = document.getElementById('agy-claude-plus-popover');
   if (pop) { pop.remove(); return; }
@@ -2248,7 +2312,7 @@ function openClaudePlusPopover(): void {
   setTimeout(() => document.addEventListener('click', closeHandler), 50);
 }
 
-
+// ─── Top Chrome Hamburger Menu Popover ─────────────────────────────────
 function openHamburgerMenu(): void {
   let pop = document.getElementById('agy-claude-hamburger-menu');
   if (pop) { pop.remove(); return; }
@@ -2308,7 +2372,7 @@ function openHamburgerMenu(): void {
   setTimeout(() => document.addEventListener('click', closeHandler), 50);
 }
 
-
+// ─── Global Event Delegation (Attached ONCE) ───────────────────────────
 let claudeDelegationAttached = false;
 function attachClaudeDelegation(): void {
   if (claudeDelegationAttached) return;
@@ -2368,7 +2432,7 @@ function attachClaudeDelegation(): void {
       }
     }
 
-
+    // 1. Mode Switcher
     const modeBtn = target.closest('.agy-mode-pill') as HTMLElement | null;
     if (modeBtn) {
       const mode = modeBtn.getAttribute('data-mode') as 'home' | 'code';
@@ -2376,21 +2440,21 @@ function attachClaudeDelegation(): void {
       return;
     }
 
-
+    // 2. New Chat
     if (target.closest('#agy-claude-new-btn')) {
       if (agyCurrentMode === 'home') { void coworkView?.navigate(); return; }
       handleNewConversation();
       return;
     }
 
-
+    // 3. User Card Menu Trigger
     if (target.closest('#agy-claude-user-card')) {
       e.stopPropagation();
       toggleUserMenu();
       return;
     }
 
-
+    // 4. Composer Pill Triggers
     if (target.closest('#agy-pill-model')) {
       e.stopPropagation();
       openClaudeModelPopover();
@@ -2418,7 +2482,7 @@ function attachClaudeDelegation(): void {
       return;
     }
 
-
+    // 5. In-composer enter / stop button
     if (target.closest('.agy-enter-btn')) {
       e.stopPropagation();
       const inputBox = document.getElementById('antigravity.agentSidePanelInputBox');
@@ -2443,7 +2507,7 @@ function attachClaudeDelegation(): void {
       return;
     }
 
-
+    // 6. Top Chrome Buttons
     if (target.closest('#agy-top-menu-btn')) {
       e.stopPropagation();
       const nativeMenu = document.querySelector('button[data-testid="titlebar-more-actions"]') as HTMLButtonElement | null;
@@ -2488,7 +2552,7 @@ function attachClaudeDelegation(): void {
 }
 
 
-
+// Shared data and controls for native Antigravity and the optional Claude skin.
 let insightsData: any = null;
 let insightsPending: Promise<void> | undefined;
 let insightsReadAt = 0;
@@ -2756,7 +2820,7 @@ function syncInsightsUi(): void {
   }else host?.remove();
 }
 
-
+// ─── Main Claude Desktop DOM Injection (STABLE SINGLETONS - NO FLICKER) ──
 let chatHistoryTab: 'overview' | 'models' = 'overview';
 let chatHistoryRange = 0;
 function summarizeChatHistory(entries: ChatHistoryEntry[], days: number, now = Date.now()) {
@@ -3310,7 +3374,7 @@ function morphToClaudeDesktop(): void {
     document.body.classList.add(modeClass);
   }
 
-
+  // 1. Top Chrome Bar
   let bar = document.getElementById('agy-claude-chrome-bar');
   if (!bar) {
     bar = document.createElement('div');
@@ -3320,7 +3384,7 @@ function morphToClaudeDesktop(): void {
       <button type="button" class="agy-chrome-btn" title="Toggle Sidebar (Ctrl+B)" id="agy-top-sidebar-btn">${CLAUDE_ICONS.sidebarToggle}</button>
       <button type="button" class="agy-chrome-btn" title="Back" id="agy-top-back-btn">${CLAUDE_ICONS.back}</button>
       <button type="button" class="agy-chrome-btn" title="Forward" id="agy-top-fwd-btn">${CLAUDE_ICONS.forward}</button>
-
+      
       <div class="agy-chrome-trailing">
         <button type="button" class="agy-chrome-btn active" title="Terminal" id="agy-top-term-btn">${CLAUDE_ICONS.terminal}</button>
         <button type="button" class="agy-chrome-btn" aria-label="Minimize" data-agy-window-action="minimize"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor"><path d="M1 6h10"/></svg></button>
@@ -3331,7 +3395,7 @@ function morphToClaudeDesktop(): void {
     document.body.prepend(bar);
   }
 
-
+  // 2. Sidebar Header
   const realNav = document.querySelector('div[role="navigation"][aria-label="Sidebar"]');
   if (realNav) {
     let sHeader = realNav.querySelector('#agy-claude-sidebar-header') as HTMLElement | null;
@@ -3372,7 +3436,7 @@ function morphToClaudeDesktop(): void {
       });
     }
 
-
+    // 3. User Card at Sidebar bottom
     let uCard = realNav.querySelector('#agy-claude-user-card') as HTMLButtonElement | null;
     if (!uCard) {
       uCard = document.createElement('button');
@@ -3388,13 +3452,13 @@ function morphToClaudeDesktop(): void {
     }
   }
 
-
+  // 4. Composer & Project Pills
   const inputBox = document.getElementById('antigravity.agentSidePanelInputBox');
   if (inputBox) {
     syncOriginalClawd(inputBox);
-
+    // Project selection pills: ONLY SHOWN IN NEW CHAT (when native project-selector-trigger exists AND no messages)
     const nativeProjectTrigger = document.querySelector('button[data-testid="project-selector-trigger"]') as HTMLButtonElement | null;
-
+    // Empty scroll containers are also mounted on the new-chat screen.
     const hasMessages = nativeControlState?.existingConversation === true || document.querySelector(
       '[data-testid="virtuoso-item-list"] > *, [class*="chat-scroll"] > *, [data-message-id]',
     ) !== null;
@@ -3451,13 +3515,13 @@ function morphToClaudeDesktop(): void {
       if (projectPills.nextSibling !== inputBox) inputBox.before(projectPills);
       syncEnvironmentControl();
     } else {
-
+      // In active conversation or when trigger is gone: REMOVE project pills!
       if (projectPills) {
         projectPills.remove();
       }
     }
 
-
+    // Enter / Stop button inside composer
     let enterBtn = inputBox.querySelector('.agy-enter-btn') as HTMLButtonElement | null;
     if (!enterBtn) {
       enterBtn = document.createElement('button');
@@ -3476,7 +3540,7 @@ function morphToClaudeDesktop(): void {
     }
     updateEnterBtnState();
 
-
+    // Bottom controls (NO AUTO, BIGGER PLUS)
     let footer = document.getElementById('agy-claude-composer-footer');
     if (!footer) {
       footer = document.createElement('div');
@@ -3497,13 +3561,13 @@ function morphToClaudeDesktop(): void {
       `;
       inputBox.parentElement?.insertBefore(footer, inputBox.nextSibling);
 
-
+      // Composer clicks are handled once by attachClaudeDelegation.
     }
 
-
+    // React can replace or move the native composer without removing our siblings.
     if (inputBox.nextSibling !== footer) inputBox.after(footer);
 
-
+    // Disclaimer
     let disclaimer = document.getElementById('agy-claude-disclaimer');
     if (!disclaimer) {
       disclaimer = document.createElement('div');
@@ -3584,7 +3648,7 @@ function morphToClaudeDesktop(): void {
   }
 }
 
-
+// ─── Popovers Implementation ───────────────────────────────────────────
 function toggleUserMenu(): void {
   let menu = document.getElementById('agy-claude-user-menu');
   if (menu) { menu.remove(); return; }
@@ -4096,7 +4160,7 @@ window.addEventListener('DOMContentLoaded', () => {
           }
         }
       } catch {
-
+        /* ignore */
       }
     };
     window.addEventListener('click', unlockAudio, { once: true });
@@ -4108,7 +4172,7 @@ window.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await poolAPI.getAudioData(safeTheme);
       if (res && res.success && res.dataUri) {
-
+        // Method 1: Web Audio API (direct hardware pipeline in Chromium/Electron)
         try {
           const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
           if (AudioContextClass) {
@@ -4138,7 +4202,7 @@ window.addEventListener('DOMContentLoaded', () => {
           console.warn('[Antigravity+] Web Audio failed, falling back to HTML5 Audio:', ctxErr);
         }
 
-
+        // Method 2: HTML5 Audio element
         try {
           if (activeAudio) {
             activeAudio.pause();
@@ -5282,7 +5346,7 @@ window.addEventListener('DOMContentLoaded', () => {
               project: project.value.trim(),
               enabled: account?.enabled !== false,
             };
-
+            // IDs bind masked secrets to their stored record, so changing an existing ID requires fresh credentials.
             if (
               account &&
               accountId !== account.id &&
@@ -5523,7 +5587,7 @@ window.addEventListener('DOMContentLoaded', () => {
       try {
         await activeGeneralRefresh();
       } catch {
-
+        /* ignore */
       }
     }
     findRefreshButton()?.click();
@@ -6117,7 +6181,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 choice.displayName || choice.id,
                 prior?.name || uniqueName(`models/${provider.value}/${choice.id}`),
               );
-
+              // Prefer explicit form overrides; otherwise retain the catalog's advertised limits/capabilities.
               for (const key of ['contextWindow', 'maxOutputTokens', 'supportsVision', 'supportsThinking'] as const) {
                 if (config[key] === undefined && choice[key] !== undefined) config[key] = choice[key];
               }
@@ -6329,7 +6393,8 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   function findSettingsMount(): HTMLElement | null {
     if (typeof document === 'undefined' || !document) return null;
-
+    if (document.querySelector('[data-testid="agent-input-box"], [data-testid="autoscroll-viewport"], #agy-cowork-root')) return null;
+    // Inside Antigravity Settings dialog, custom models are centralized exclusively in General+
     if (
       document.querySelector('div[role="dialog"][aria-label="Settings"]') ||
       document.querySelector('.settings-modal-container')
@@ -6341,7 +6406,7 @@ window.addEventListener('DOMContentLoaded', () => {
       (node) =>
         node.children.length === 0 &&
         /^(Models\s*(?:&|and)\s*Usage|Model Settings|MCP Servers|MCP)$/i.test(node.textContent?.trim() || '') &&
-        !node.closest('#agy-custom-models-section,button,nav,[role="tablist"],[hidden],[aria-hidden="true"]'),
+        !node.closest('#agy-custom-models-section,button,nav,[role="tablist"],[hidden],[aria-hidden="true"],[data-testid="planner-response-text"],[data-testid="user-input-step"],[data-testid="autoscroll-viewport"],#agy-cowork-root'),
     );
     if (heading) {
       const section = heading.closest('section');
@@ -6677,12 +6742,12 @@ window.addEventListener('DOMContentLoaded', () => {
         const totalCap = summary?.totalCapacityPercent ?? accounts.length * 100;
         const combinedFraction = summary?.combinedRemainingFraction ?? 1.0;
 
-
+        // --- SECTION 1: Account Pool & Hot-Swap ---
         const sec1 = element('div', 'space-y-2');
         sec1.append(createNativeSectionHeader('Account Pool & Hot-Swap'));
         const poolCard = createNativeCard();
 
-
+        // Row 1: Seamless Hot-Swap
         poolCard.append(
           createNativeRow(
             'Seamless Hot-Swap',
@@ -6694,7 +6759,7 @@ window.addEventListener('DOMContentLoaded', () => {
           ),
         );
 
-
+        // Row 2: Quota Display Mode
         poolCard.append(
           createNativeRow(
             'Quota Display Mode',
@@ -6715,7 +6780,7 @@ window.addEventListener('DOMContentLoaded', () => {
           ),
         );
 
-
+        // Row 3: Active Account Line in Limits
         poolCard.append(
           createNativeRow(
             'Active Account Line in Limits',
@@ -6740,7 +6805,7 @@ window.addEventListener('DOMContentLoaded', () => {
         sec1.append(poolCard);
         contentArea.append(sec1);
 
-
+        // --- SECTION 2: Audio Notifications ---
         const sec2 = element('div', 'space-y-2');
         sec2.append(createNativeSectionHeader('Audio Notifications'));
         const soundCard = createNativeCard();
@@ -6789,7 +6854,7 @@ window.addEventListener('DOMContentLoaded', () => {
         sec2.append(soundCard);
         contentArea.append(sec2);
 
-
+        // --- SECTION: System Prompt Engine ---
         const promptEngineMode = data.promptEngineMode || 'antigravity';
         const customPromptText = data.customPromptText || '';
         const uiThemeMode = data.uiThemeMode || 'antigravity';
@@ -6840,7 +6905,7 @@ window.addEventListener('DOMContentLoaded', () => {
         promptSec.append(promptCard);
         contentArea.append(promptSec);
 
-
+        // --- SECTION: Interface Theme ---
         const themeSec = element('div', 'space-y-2');
         themeSec.append(createNativeSectionHeader('Interface Theme'));
         const themeCard = createNativeCard();
@@ -6867,7 +6932,7 @@ window.addEventListener('DOMContentLoaded', () => {
         themeSec.append(themeCard);
         contentArea.append(themeSec);
 
-
+        // --- SECTION: Administrator Mode ---
         const adminSec = element('div', 'space-y-2');
         adminSec.append(createNativeSectionHeader('Administrator Privileges'));
         const adminCard = createNativeCard();
@@ -6913,7 +6978,7 @@ window.addEventListener('DOMContentLoaded', () => {
         adminSec.append(adminCard);
         contentArea.append(adminSec);
 
-
+        // --- SECTION 3: Connected Google Accounts ---
         const sec3 = element('div', 'space-y-2');
         const quotaActions = element('div', 'flex flex-wrap items-center gap-1.5 shrink-0');
         quotaActions.append(
@@ -6935,7 +7000,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         sec3.append(createNativeSectionHeader('Connected Google Accounts', quotaActions, accounts.length));
 
-
+        // Capacity Progress Card
         const statusCard = createNativeCard();
         let capTitle = `Combined Capacity: ${totalCap}% (${Math.round(combinedFraction * 100)}% remaining)`;
         if (mode === 'normalized') {
@@ -6965,7 +7030,7 @@ window.addEventListener('DOMContentLoaded', () => {
         );
         sec3.append(statusCard);
 
-
+        // Account list card
         const accountsCard = createNativeCard();
         if (accounts.length === 0) {
           accountsCard.append(
@@ -7077,7 +7142,7 @@ window.addEventListener('DOMContentLoaded', () => {
         sec3.append(accountsCard);
         contentArea.append(sec3);
 
-
+        // --- SECTION 4: Custom Models & Local Gateways ---
         let customModels: CustomModelEntry[] = [];
         try {
           customModels = await storageAPI.getCustomModels();
@@ -7114,7 +7179,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
             const left = element('div', 'flex items-center gap-3 min-w-0 flex-1');
 
-
+            // Provider badge
             const providerName = (model.provider || 'custom').toUpperCase();
             const providerBadge = element(
               'span',
@@ -7162,7 +7227,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
             const right = element('div', 'shrink-0 flex items-center gap-2');
 
-
+            // Test button
             const testBtn = createNativeButton(
               'Test',
               async () => {
@@ -7190,7 +7255,7 @@ window.addEventListener('DOMContentLoaded', () => {
             );
 
 
-
+            // Edit button
             const editBtn = createNativeButton(
               'Edit',
               () => openModelModal(model, 'edit'),
@@ -7198,7 +7263,7 @@ window.addEventListener('DOMContentLoaded', () => {
               ICONS.edit,
             );
 
-
+            // Delete button
             const deleteBtn = createNativeButton(
               'Delete',
               async () => {
@@ -7211,7 +7276,7 @@ window.addEventListener('DOMContentLoaded', () => {
               ICONS.x,
             );
 
-
+            // Enable switch
             const isEnabled = model.enabled !== false;
             const toggle = createNativeSwitch(isEnabled, async (val) => {
               model.enabled = val;
@@ -7227,7 +7292,7 @@ window.addEventListener('DOMContentLoaded', () => {
         sec4.append(modelsCard);
         contentArea.append(sec4);
 
-
+        // --- SECTION 5: Antigravity+ In-App Updates ---
         const sec5 = element('div', 'space-y-2');
         const updateActions = element('div', 'flex items-center gap-2');
         const updateStatusEl = element(
@@ -7419,7 +7484,34 @@ window.addEventListener('DOMContentLoaded', () => {
         );
         webSection.append(webCard); contentArea.append(webSection);
 
-
+        // --- SECTION 6: Community & About ---
+        const customizationSection = element('div', 'space-y-2');
+        customizationSection.append(createNativeSectionHeader('Custom themes & plugins'));
+        const customizationCard = createNativeCard();
+        let themeEnabled = plusCustomizations.cssEnabled;
+        customizationCard.append(createNativeRow('Custom theme', 'Load a .plus or CSS file and apply your own interface.', createNativeSwitch(themeEnabled, checked => { themeEnabled = checked; })));
+        const cssWrap = element('div', 'p-3 flex flex-col gap-2');
+        const cssWidget = createCssEditor(plusCustomizations.themeSource || plusCustomizations.css); const cssEditor = cssWidget.input;
+        const filesRow = element('div', 'flex flex-wrap items-center gap-2');
+        const themeFiles = document.createElement('select'); themeFiles.className = 'bg-secondary text-foreground text-xs rounded-lg border border-border px-2.5 py-1.5 outline-none cursor-pointer'; themeFiles.setAttribute('aria-label', 'Theme files');
+        const fileStatus = element('span', 'text-xs text-muted-foreground');
+        const refreshThemeFiles = async () => { const result = await ipcRenderer.invoke('plus-customizations:themes'); if (!result?.success) { fileStatus.textContent = result?.error || 'Could not list themes'; return; } themeFiles.replaceChildren(); const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = result.files.length ? 'Select theme file' : 'No theme files'; themeFiles.append(placeholder); for (const name of result.files) { const option = document.createElement('option'); option.value = name; option.textContent = name; themeFiles.append(option); } };
+        filesRow.append(themeFiles, createNativeButton('Load', async () => { if (!themeFiles.value) return; const result = await ipcRenderer.invoke('plus-customizations:theme-read', themeFiles.value); if (!result?.success) { fileStatus.textContent = result?.error || 'Could not read theme'; return; } cssEditor.value = result.css; themeScriptEditor.value = result.themeScript || ''; cssEditor.dispatchEvent(new Event('input', { bubbles: true })); fileStatus.textContent = 'Loaded into editor'; }), createNativeButton('Open themes folder', async () => { const result = await ipcRenderer.invoke('plus-customizations:themes-open'); if (!result?.success) fileStatus.textContent = result?.error || 'Could not open folder'; }), createNativeButton('Refresh', refreshThemeFiles), fileStatus);
+        const themeScriptEditor = document.createElement('textarea'); themeScriptEditor.className = 'w-full p-2 bg-background/50 border border-border/50 rounded text-xs text-foreground font-mono'; themeScriptEditor.rows = 6; themeScriptEditor.value = plusCustomizations.themeScript || ''; themeScriptEditor.placeholder = '// Optional theme JavaScript: create elements and return a cleanup function'; themeScriptEditor.setAttribute('aria-label', 'Theme JavaScript');
+        const themeScriptDetails = document.createElement('details'); const themeScriptSummary = document.createElement('summary'); themeScriptSummary.textContent = 'Theme JavaScript'; themeScriptDetails.append(themeScriptSummary, themeScriptEditor); themeScriptDetails.hidden = true;
+        cssWrap.append(filesRow, cssWidget.root, themeScriptDetails); customizationCard.append(cssWrap); void refreshThemeFiles();
+        const pluginList = element('div', 'flex flex-col');
+        const renderPlugins = () => { pluginList.replaceChildren(); for (const plugin of plusCustomizations.plugins) {
+          const row = element('div', 'p-3 flex flex-col gap-2');
+          const controls = element('div', 'flex items-center gap-2');
+          controls.append(createNativeSwitch(plugin.enabled, checked => { plugin.enabled = checked; }), createNativeButton('Remove', () => { plusCustomizations.plugins = plusCustomizations.plugins.filter(p => p !== plugin); renderPlugins(); }));
+          row.append(createNativeRow(plugin.name, plugin.id, controls));
+          const editor = document.createElement('textarea'); editor.rows = 6; editor.value = plugin.code; editor.spellcheck = false; editor.className = 'w-full p-2 bg-background/50 border border-border/50 rounded text-xs text-foreground font-mono'; editor.setAttribute('aria-label', plugin.name + ' JavaScript'); editor.oninput = () => { plugin.code = editor.value; }; row.append(editor); pluginList.append(row);
+        } };
+        renderPlugins(); customizationCard.append(pluginList);
+        const actions = element('div', 'p-3 flex flex-wrap items-center gap-2'); const status = element('span', 'text-xs text-muted-foreground');
+        actions.append(createNativeButton('Add plugin', () => { const name = prompt('Plugin name'); if (!name?.trim()) return; const id = 'plugin-' + Date.now().toString(36); plusCustomizations.plugins.push({ id, name: name.trim().slice(0, 100), code: '// JavaScript: document, window, api\n', enabled: false }); renderPlugins(); }), createNativeButton('Save and apply', async () => { let parsed: {css:string;script:string}; try { parsed = compilePlusTheme(cssEditor.value); } catch (error) { status.textContent = (error as Error).message; return; } plusCustomizations.css = parsed.css; plusCustomizations.themeSource = cssEditor.value.startsWith('@plus 1\n') ? cssEditor.value : ''; plusCustomizations.cssEnabled = themeEnabled; plusCustomizations.themeScript = plusCustomizations.themeSource ? parsed.script : themeScriptEditor.value; const result = await ipcRenderer.invoke('plus-customizations:save', plusCustomizations); if (!result?.success) { status.textContent = result?.error || 'Could not save'; return; } if (themeEnabled) { const layoutMatch = /^\s*\/\*\s*@antigravity-layout:\s*(claude|native)\s*\*\//i.exec(plusCustomizations.css); if (layoutMatch) { const claude = layoutMatch[1].toLowerCase() === 'claude'; const changed = await poolAPI.setOptions({ uiThemeMode: claude ? 'claude' : 'antigravity' }); if (!changed?.success) { status.textContent = 'Could not change layout'; return; } applyClaudeTheme(claude); } } applyPlusCustomizations(); status.textContent = 'Saved'; }, true), status);
+        customizationCard.append(actions); customizationSection.append(customizationCard); contentArea.append(customizationSection);
         const sec6 = element('div', 'space-y-2');
         sec6.append(createNativeSectionHeader('About Antigravity+'));
         const aboutCard = createNativeCard();
@@ -7492,14 +7584,14 @@ window.addEventListener('DOMContentLoaded', () => {
     if (typeof document === 'undefined' || !document) return null;
     const generalTab = findSettingsGeneralTab();
     if (generalTab) {
-
+      // Find the sidebar container (parent of all tab buttons)
       let sidebar: HTMLElement | null = generalTab.parentElement;
       while (sidebar && sidebar.parentElement && sidebar.parentElement !== document.body) {
         const parent = sidebar.parentElement;
         const computed = window.getComputedStyle(parent);
         const isFlexRow = computed.display.includes('flex') && !computed.flexDirection.includes('column');
         if (isFlexRow && parent.children.length >= 2) {
-
+          // This flex row has the sidebar and the right content pane
           for (const child of Array.from(parent.children) as HTMLElement[]) {
             if (child.id === 'agy-general-plus-panel') continue;
             if (!child.contains(generalTab)) {
@@ -7595,7 +7687,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const contentPane = findSettingsContentPane();
     if (!contentPane || !contentPane.parentElement) return;
 
-
+    // Completely hide the native settings content pane while General+ is active
     contentPane.style.display = 'none';
     contentPane.setAttribute('data-agy-pane-hidden', 'true');
 
@@ -7639,7 +7731,7 @@ window.addEventListener('DOMContentLoaded', () => {
       panel.style.display = 'none';
     }
 
-
+    // Restore the native content pane with 100% of its internal React state untouched!
     const hiddenPanes = document.querySelectorAll<HTMLElement>('[data-agy-pane-hidden="true"]');
     hiddenPanes.forEach((p) => {
       p.style.display = '';
@@ -7766,14 +7858,14 @@ window.addEventListener('DOMContentLoaded', () => {
     if (typeof document === 'undefined' || !document || !document.body) return;
     isBrandingRunning = true;
     try {
-
+      // Update document title if needed
       if (document.title && !document.title.includes('Antigravity+')) {
         if (document.title.includes('Antigravity')) {
           document.title = document.title.replace(/\bAntigravity\b(?!\+)/g, 'Antigravity+');
         }
       }
 
-
+      // Replace sidebar/activitybar logo icon with Antigravity+ icon
       const svgs = document.querySelectorAll<SVGSVGElement>('svg');
       for (const svg of svgs) {
         if (
@@ -7807,7 +7899,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-
+      // Minimal Admin Badge next to brand logo
       if (!document.getElementById('agy-admin-header-badge')) {
         adminStatus ??= poolAPI.checkAdmin();
         adminStatus
@@ -7827,7 +7919,7 @@ window.addEventListener('DOMContentLoaded', () => {
           .catch(() => {});
       }
 
-
+      // Add + to "Antigravity" text nodes safely without altering DOM element tree structure
       try {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         let node: Node | null;
@@ -7846,7 +7938,7 @@ window.addEventListener('DOMContentLoaded', () => {
           }
         }
       } catch {
-
+        /* ignore */
       }
 
     } finally {
@@ -7856,6 +7948,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   function cleanupLegacyModelSections(): void {
     if (typeof document === 'undefined' || !document) return;
+    if (document.querySelector('[data-testid="agent-input-box"], [data-testid="autoscroll-viewport"], #agy-cowork-root')) document.querySelectorAll('#agy-custom-models-section, #agy-account-pool-section').forEach(el => el.remove());
     const isDialog =
       document.querySelector('div[role="dialog"][aria-label="Settings"]') ||
       document.querySelector('.settings-modal-container');
@@ -7945,12 +8038,12 @@ window.addEventListener('DOMContentLoaded', () => {
     );
   }
 
-
+  // --- Network Interceptor for Model Injection --------------------------
 
   function isSafeToIntercept(url: string): boolean {
-
-
-
+    // Never touch the internal Connect-RPC LanguageServerService channel —
+    // those responses are protocol-framed, not plain JSON, and rewriting
+    // them corrupts the renderer's RPC client / store hydration.
     if (url.includes('exa.language_server_pb.')) return false;
     if (url.includes('/LanguageServerService/')) return false;
     return true;
@@ -7968,12 +8061,12 @@ window.addEventListener('DOMContentLoaded', () => {
       customModelsCache.models = (await storageAPI.getCustomModels()).filter((model) => model.enabled !== false);
       customModelsCache.ts = Date.now();
     } catch {
-
+      /* ignore */
     }
     return customModelsCache.models;
   }
 
-
+  // Intercept XHR to inject custom models into GetAvailableModels responses
   const origXHROpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (
     method: string,
@@ -7993,8 +8086,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const url: string = (this as any)._agy_url || '';
 
     if ((url.includes('GetAvailableModels') || url.includes('fetchAvailableModels')) && isSafeToIntercept(url)) {
-
-
+      // Warm the cache without delaying native XHR events. If it is not ready by
+      // DONE, leave the response alone; load/readystatechange ordering must survive.
       if ((this as any)._agy_async) void getCustomModelsForInjection();
       const origOnReady = this.onreadystatechange;
       this.onreadystatechange = (ev: Event) => {
@@ -8035,12 +8128,12 @@ window.addEventListener('DOMContentLoaded', () => {
                     modelProvider: 'MODEL_PROVIDER_GOOGLE',
                   };
                 }
-
+                // Override response
                 Object.defineProperty(this, 'responseText', { value: JSON.stringify(parsed), writable: true });
                 Object.defineProperty(this, 'response', { value: JSON.stringify(parsed), writable: true });
               }
             } catch {
-
+              /* ignore parse errors */
             }
           }
         }
@@ -8050,7 +8143,7 @@ window.addEventListener('DOMContentLoaded', () => {
     return origXHRSend.call(this, body);
   };
 
-
+  // Intercept fetch responses for model endpoints
   const origFetch = window.fetch;
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -8103,7 +8196,7 @@ window.addEventListener('DOMContentLoaded', () => {
             });
           }
         } catch {
-
+          /* ignore parse errors */
         }
       }
     }
@@ -8120,7 +8213,7 @@ window.addEventListener('DOMContentLoaded', () => {
     return Math.abs(h);
   }
 
-
+  // Hotkey, hot-swap notifications & pool modal listeners
   if (typeof ipcRenderer?.on === 'function') {
     ipcRenderer.on('open-account-pool', () => {
       const plusTab = document.getElementById('agy-tab-general-plus');
@@ -8141,7 +8234,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let lastAudioPlayTime = 0;
     const triggerAudio = (soundName?: string) => {
       const now = Date.now();
-
+      // Completed turns are already deduplicated by the native lifecycle notifier.
       if (soundName && now - lastAudioPlayTime < 300) return;
       lastAudioPlayTime = now;
       poolAPI.getStatus().then((status) => {
@@ -8151,7 +8244,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }).catch(() => {});
     };
 
-
+    // Manual test previews from settings or hot-swap notifications
     ipcRenderer.on('agent:play-sound', (_event, soundName) => {
       triggerAudio(soundName);
     });
@@ -8162,7 +8255,7 @@ window.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('pagehide', () => generationNotifier.dispose(), { once: true });
 
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-
+      // Catch clicks on Stop/Cancel buttons anywhere in the window
       window.addEventListener(
         'click',
         (e) => {
@@ -8191,13 +8284,13 @@ window.addEventListener('DOMContentLoaded', () => {
               markCancelled();
             }
           } catch {
-
+            /* ignore */
           }
         },
-        true,
+        true, // Capturing phase
       );
 
-
+      // Catch Escape key cancellation
       window.addEventListener(
         'keydown',
         (e) => {
@@ -8231,7 +8324,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-
+  // Background auto-refresh of quotas every 3 minutes
   if (typeof setInterval !== 'undefined') {
     setInterval(() => {
       poolAPI.refreshQuota().then(() => updatePoolPill()).catch(() => {});

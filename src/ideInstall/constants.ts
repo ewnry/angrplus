@@ -1,4 +1,6 @@
-
+/**
+ * IDE Install — Constants, platform helpers, and condition checks.
+ */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7,11 +9,11 @@ import log from 'electron-log/main';
 import { IDE_NEW_DATA_DIR, IDE_OLD_DATA_DIR } from '../paths';
 import { StorageManager } from '../storage';
 
-
+// ─── Constants ──────────────────────────────────────────────────────────────
 
 export const WIZARD_SHOWN_KEY = 'ide-install-wizard-shown';
 
-
+/** Fetches the latest stable IDE download URL for a given platform. */
 export async function fetchIdeDownloadUrl(platformKey: string): Promise<string> {
   const url = `https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/api/update/${platformKey}/stable/latest`;
   const response = await fetch(url);
@@ -25,7 +27,7 @@ export async function fetchIdeDownloadUrl(platformKey: string): Promise<string> 
   return data.url;
 }
 
-
+// ─── Platform Helpers ──────────────────────────────────────────────────────
 
 export function getPlatformKey(): string {
   if (process.platform === 'darwin' && process.arch === 'x64') {
@@ -38,7 +40,7 @@ export function getPlatformKey(): string {
   return `${process.platform}-${process.arch}${suffix}`;
 }
 
-
+/** Returns the expected installation path for the IDE. */
 export function getIdeInstallPath(): string {
   switch (process.platform) {
     case 'darwin':
@@ -56,24 +58,31 @@ export function getIdeInstallPath(): string {
   }
 }
 
+// ─── Condition Checks ──────────────────────────────────────────────────────
 
-
-
+/**
+ * Determines whether the IDE install wizard should be shown.
+ *
+ * Conditions (all must be true):
+ * 1. Wizard has not been shown before (checked via storage)
+ * 2. `~/.gemini/antigravity-ide` does NOT exist
+ * 3. `~/.gemini/antigravity` DOES exist
+ */
 export async function shouldShowIdeInstallWizard(storageManager: StorageManager): Promise<boolean> {
-
+  // 1. Already shown?
   const items = await storageManager.getItems();
   if (items[WIZARD_SHOWN_KEY] === 'true') {
     log.info('[IDE Wizard] Already shown, skipping.');
     return false;
   }
-
+  // 1a. If not shown before, then now mark it as shown.
   await storageManager.updateItems({ [WIZARD_SHOWN_KEY]: 'true' });
-
+  // 2. IDE already installed separately?
   if (fs.existsSync(IDE_NEW_DATA_DIR)) {
     log.info(`[IDE Wizard] ${IDE_NEW_DATA_DIR} exists — IDE already installed, skipping.`);
     return false;
   }
-
+  // 3. Old IDE data present (user was migrated)?
   if (!fs.existsSync(IDE_OLD_DATA_DIR)) {
     log.info(`[IDE Wizard] ${IDE_OLD_DATA_DIR} not found — user was not migrated, skipping.`);
     return false;

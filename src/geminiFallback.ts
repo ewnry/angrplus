@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { authenticatedGoogleFileUrl } from './proxy/loopbackSecurity';
 import type { GeminiBody } from './proxy/requestOptions';
 
+/** Resolve subscription-only file references without decoding binary attachments as text. */
 export async function resolveFallbackFiles(body: GeminiBody, authorization: string): Promise<void> {
   let total = 0;
   const limit = 20 * 1024 * 1024;
@@ -39,6 +40,7 @@ export async function resolveFallbackFiles(body: GeminiBody, authorization: stri
   }
 }
 
+/** Native Google subscription requests may fall back only to an explicitly selected Gemini API key. */
 export function isGeminiByok(model: Partial<CustomModel>): boolean {
   try {
     const url = new URL(model.apiUrl || '');
@@ -55,7 +57,7 @@ export function selectGeminiFallback(models: CustomModel[], selected: string | u
   if (!selected || typeof nativeModel !== 'string' || !/^(?:models\/)?gemini[-.]/i.test(nativeModel)) return undefined;
   const match = models.find(model => model.name === selected && isGeminiByok(model));
   if (!match) return undefined;
-
+  // Preserve the full prompt and prevent an unrelated configured fallback chain from being charged.
   return { ...match, fallbackModels: [], contextWindow: undefined };
 }
 

@@ -1,4 +1,7 @@
-
+/**
+ * Authentic Claude Desktop & Lucide Vector Icons
+ * Extracted directly from Claude Desktop distribution and Lucide icon specs.
+ */
 
 export const CLAUDE_ICONS = {
   cowork: `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -204,6 +207,12 @@ export function getIcon(name: keyof typeof CLAUDE_ICONS): string {
   return CLAUDE_ICONS[name] || '';
 }
 
+/**
+ * Generates an SVG circular progress ring for context window usage.
+ * @param percent 0 - 100
+ * @param size pixel diameter (default 16)
+ * @param stroke stroke width (default 2)
+ */
 export function getContextRingSvg(percent: number, size = 16, stroke = 2): string {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;

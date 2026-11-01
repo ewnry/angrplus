@@ -36,7 +36,7 @@ export function summarizeQuota(points: QuotaPoint[], now = Date.now()) {
   for (const point of points) { const key = `${point.account}/${point.group}/${point.bucket}`; const rows = grouped.get(key) || []; rows.push(point); grouped.set(key, rows); }
   return [...grouped.values()].map(raw => {
     const rows = raw.sort((a,b) => a.at-b.at), latest = rows[rows.length-1];
-
+    // A reset breaks the consumption series; never extrapolate across replenishment.
     let start = rows.length - 1;
     while (start > 0 && rows[start].remaining <= rows[start-1].remaining && rows[start].reset === rows[start-1].reset && rows[start-1].at >= now - 86400000) start--;
     const first = rows[start], elapsed = latest.at - first.at, drop = first.remaining - latest.remaining;

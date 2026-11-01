@@ -1,4 +1,4 @@
-
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { safeStorage, app } = require('electron');
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,7 +27,9 @@ function encryptLocal(value: string): string {
   return 'local-gcm:' + Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
 }
 
-
+/**
+ * Creates a backup of the specified file with a .bak extension.
+ */
 export function backupFile(filePath: string): void {
   try {
     if (fs.existsSync(filePath)) {
@@ -40,7 +42,9 @@ export function backupFile(filePath: string): void {
   }
 }
 
-
+/**
+ * Checks if Electron's safeStorage API is fully functional on the current system.
+ */
 export function isEncryptionAvailable(): boolean {
   try {
     return !!(safeStorage && safeStorage.isEncryptionAvailable());
@@ -49,7 +53,9 @@ export function isEncryptionAvailable(): boolean {
   }
 }
 
-
+/**
+ * Use OS-backed storage when available; otherwise AES-GCM with a local user key.
+ */
 export function encryptString(plainText: string): string {
   if (!plainText || plainText === 'none') return plainText;
 
@@ -66,7 +72,9 @@ export function encryptString(plainText: string): string {
   }
 }
 
-
+/**
+ * Decrypts a previously encrypted string. Handles safeStorage, base64 fallback, and plaintext gracefully.
+ */
 export function decryptString(encryptedText: string): string {
   if (!encryptedText || encryptedText === 'none') return encryptedText;
 
@@ -108,7 +116,7 @@ export function decryptString(encryptedText: string): string {
     }
   }
 
-
+  // Plaintext (older config, not yet migrated)
   return encryptedText;
 }
 
@@ -119,7 +127,9 @@ interface ModelWithKey {
   [key: string]: unknown;
 }
 
-
+/**
+ * Iterates through a list of custom models and encrypts their API keys.
+ */
 export function encryptModels(models: ModelWithKey[] | null): ModelWithKey[] {
   if (!models || !Array.isArray(models)) return [];
   return models.map((model) => {
@@ -134,7 +144,9 @@ export function encryptModels(models: ModelWithKey[] | null): ModelWithKey[] {
   });
 }
 
-
+/**
+ * Iterates through a list of custom models and decrypts their API keys for in-memory use.
+ */
 export function decryptModels(models: ModelWithKey[] | null): ModelWithKey[] {
   if (!models || !Array.isArray(models)) return [];
   return models.map((model) => {

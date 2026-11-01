@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 
-
+/** The optional binary patch cannot follow the language server's dynamic port flag. */
 export function getRequiredProxyPort(appPath: string): number | undefined {
   const marker = path.join(appPath, 'antigravity-proxy.json');
   if (!fs.existsSync(marker)) return undefined;

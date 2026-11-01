@@ -59,7 +59,7 @@ export function checkedUrl(value: string): URL {
   return url;
 }
 
-
+/** Small bounded requests, no credential forwarding across redirects. */
 export function requestJson(
   urlValue: string,
   headers: Record<string, string> = {},
@@ -269,7 +269,7 @@ export function createModelManager(
     const model = redactModel(raw);
     if (!Array.isArray(model.googleAccounts)) return;
     const index = model.googleAccounts.findIndex((item) => item.id === account.id);
-    if (index < 0) return;
+    if (index < 0) return; // Account or model removed while a request was in flight.
     model.googleAccounts[index] = {
       ...model.googleAccounts[index],
       accessToken: account.accessToken,
@@ -375,7 +375,7 @@ export function createModelManager(
       const previous = resolveGoogleAccount({ modelName: input.name, account: selected });
       previous.project ||= input.googleProject || (saved?.googleProject as string | undefined);
       const account = await dependencies.refreshGoogleAccount(previous);
-
+      // Persist refreshed tokens only if their source credentials are still current.
       if (input.name) persistGoogleAccount(input.name, account, previous);
       else if (pending.has(account.id))
         pending.set(account.id, { account, expiresAt: dependencies.now() + 10 * 60 * 1000 });

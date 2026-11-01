@@ -1,4 +1,4 @@
-
+/** Fixed Google error guidance. Never accepts or returns provider response bodies or credentials. */
 export type GoogleAccessErrorCategory =
   | 'authentication'
   | 'access-denied'

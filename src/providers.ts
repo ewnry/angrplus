@@ -1,4 +1,4 @@
-
+/** Shared provider presets. Existing saved models retain their historical wire format. */
 export type ApiFormat = 'openai' | 'anthropic' | 'google';
 export interface ProviderPreset {
   id: string;
@@ -68,7 +68,7 @@ export function getProvider(id: string): ProviderPreset | undefined {
   return PROVIDERS.find((provider) => provider.id === id);
 }
 
-
+/** Defaults for old files without apiFormat must not silently change protocol. */
 export function resolveApiFormat(provider: string, override?: ApiFormat): ApiFormat {
   if (override) return override;
   if (['deepseek', 'kimi', 'fireworks', 'lmstudio', 'llamacpp'].includes(provider)) return 'anthropic';

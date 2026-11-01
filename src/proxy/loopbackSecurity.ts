@@ -8,6 +8,7 @@ function loopbackOrigins(port: number, protocols: string[]): string[] {
   return protocols.flatMap((protocol) => [`${protocol}//127.0.0.1:${port}`, `${protocol}//localhost:${port}`]);
 }
 
+/** Native language-server callers omit Origin; browser callers must use an owned origin. */
 export function guardLoopbackRequest(req: IncomingMessage, res: ServerResponse, languageServerPort?: number): boolean {
   const port = req.socket.localPort;
   const duplicate = ['host', 'origin'].some(
@@ -29,6 +30,7 @@ export function guardLoopbackRequest(req: IncomingMessage, res: ServerResponse, 
   return true;
 }
 
+/** The desktop supplies its current LS port, never a port learned from an HTTP caller. */
 export function languageServerModelsUrl(value: string, port?: number): URL | undefined {
   if (!validPort(port)) return undefined;
   try {
@@ -52,6 +54,7 @@ export function languageServerModelsUrl(value: string, port?: number): URL | und
   }
 }
 
+/** Incoming Google credentials may only accompany HTTPS downloads from Google API hosts. */
 export function authenticatedGoogleFileUrl(value: string): URL | undefined {
   try {
     const url = new URL(value);

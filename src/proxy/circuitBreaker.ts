@@ -9,7 +9,7 @@ interface CircuitState {
   probing: boolean;
 }
 
-
+/** One half-open probe per model; other callers use their configured fallback. */
 export class CircuitBreaker {
   private readonly states = new Map<string, CircuitState>();
   constructor(private readonly now: () => number = Date.now) {}

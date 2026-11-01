@@ -4,7 +4,10 @@ import * as path from 'path';
 import { BrowserWindow } from 'electron';
 import { EventEmitter } from 'events';
 
-
+/**
+ * Manages persistent storage for the application.
+ * Stores key-value pairs.
+ */
 export class StorageManager {
   private storagePath: string;
   private defaults: Map<string, boolean> | undefined;
@@ -23,7 +26,9 @@ export class StorageManager {
     };
   }
 
-
+  /**
+   * Gets raw items from the storage file.
+   */
   async getRawItems(): Promise<Record<string, string>> {
     try {
       if (!existsSync(this.storagePath)) {
@@ -40,7 +45,11 @@ export class StorageManager {
     }
   }
 
-
+  /**
+   * Gets all items from the storage, with defaults applied.
+   *
+   * @returns A record of key-value pairs.
+   */
   async getItems(): Promise<Record<string, string | null>> {
     const items = await this.getRawItems();
     const merged: Record<string, string | null> = { ...items };
@@ -54,7 +63,11 @@ export class StorageManager {
     return merged;
   }
 
-
+  /**
+   * Updates items in the storage.
+   *
+   * @param changes A record of key-value pairs to update. If a value is null, the key will be deleted.
+   */
   async updateItems(changes: Record<string, string | null>): Promise<void> {
     try {
       const currentItems = await this.getRawItems();
@@ -65,7 +78,7 @@ export class StorageManager {
           currentItems[key] = value;
         }
       }
-
+      // Ensure directory exists
       const dir = path.dirname(this.storagePath);
       if (!existsSync(dir)) {
         await fs.mkdir(dir, { recursive: true });

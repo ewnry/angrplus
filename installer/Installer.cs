@@ -225,6 +225,7 @@ namespace AntigravityPlus.Installer
         {
             Console.WriteLine();
 
+            // 1. Status
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write("  Status     ");
             if (string.IsNullOrEmpty(asarPath) || !File.Exists(asarPath))
@@ -251,6 +252,7 @@ namespace AntigravityPlus.Installer
                 }
             }
 
+            // 2. Target
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write("  Target     ");
             if (string.IsNullOrEmpty(resourcesPath))
@@ -264,6 +266,7 @@ namespace AntigravityPlus.Installer
                 Console.WriteLine(Path.GetDirectoryName(resourcesPath));
             }
 
+            // 3. Backup
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write("  Backup     ");
             if (File.Exists(backupPath))
@@ -279,6 +282,7 @@ namespace AntigravityPlus.Installer
                 Console.WriteLine("None (created on first patch)");
             }
 
+            // 4. Geo-Bypass
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write("  Geo-Bypass ");
             string lsPath = !string.IsNullOrEmpty(resourcesPath) ? Path.Combine(resourcesPath, "bin", "language_server.exe") : null;
@@ -297,6 +301,7 @@ namespace AntigravityPlus.Installer
                 Console.WriteLine(" (will patch on install)");
             }
 
+            // 5. Process
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write("  Process    ");
             bool running = IsAntigravityRunning();
@@ -589,6 +594,7 @@ namespace AntigravityPlus.Installer
             Console.ReadKey(true);
         }
 
+        // Reuse the installed Electron runtime; no global Node.js or network required.
         internal static void RunRuntimePatch(string action)
         {
             if (String.IsNullOrEmpty(resourcesPath) || !File.Exists(asarPath) || !File.Exists(exePath))
@@ -634,7 +640,7 @@ namespace AntigravityPlus.Installer
                     if (!process.WaitForExit(120000))
                     {
                         if (action == "--check") { process.Kill(); throw new InvalidOperationException("Compatibility check timed out. No application files changed."); }
-
+                        // Do not terminate a commit halfway through: wait for its transaction to finish.
                         Console.WriteLine("Waiting for the patch transaction to finish...");
                         process.WaitForExit();
                     }
@@ -654,7 +660,7 @@ namespace AntigravityPlus.Installer
 
         private static string QuoteArgument(string value)
         {
-
+            // Windows argv quoting, including trailing backslashes.
             var text = new StringBuilder("\""); int slashes = 0;
             foreach (char c in value)
             {
@@ -693,6 +699,8 @@ namespace AntigravityPlus.Installer
             }
         }
 
+        // x64 Manager gate from avencores/open-antigravity-patcher v1.3.8:
+        // https://gitlab.com/avencores/open-antigravity-patcher (83f72202).
         internal static bool CheckIsGeoPatched(string lsPath)
         {
             if (string.IsNullOrEmpty(lsPath) || !File.Exists(lsPath)) return false;
@@ -814,7 +822,7 @@ namespace AntigravityPlus.Installer
                 }
 
                 string bakPath = lsPath + ".agybak";
-
+                // Current binary is unpatched; refresh a stale backup after a vendor update.
                 File.Copy(lsPath, bakPath, true);
 
                 byte[] patchBytes = new byte[] { 0xC6, 0x40, 0x08, 0x01, 0x90, 0x90 };
@@ -951,6 +959,7 @@ namespace AntigravityPlus.Installer
 
                     SetStatus("Распаковка и установка патча Antigravity+...");
                     Program.ApplyPatchWithRetry();
+
 
                     SetStatus("Обновление успешно установлено! Запуск Antigravity...");
                     if (this.InvokeRequired)

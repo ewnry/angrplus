@@ -1,9 +1,12 @@
-
+/**
+ * Shared translator utility functions.
+ * Extracted from proxy.js to avoid duplication across translator modules.
+ */
 
 import * as path from 'path';
 import log from 'electron-log';
 
-
+// ─── Types ────────────────────────────────────────────────────────────────
 
 export interface GeminiParameterProperties {
   type?: string;
@@ -51,7 +54,7 @@ export interface FileListResponse {
 
 export type ToolResponse = string | DirectoryItem[] | MatchResult[] | FileListResponse;
 
-
+/** Tool declarations belong to one request, never to a shared model/session cache. */
 export type ToolSchemas = ReadonlyMap<string, unknown>;
 
 export function collectToolSchemas(body: unknown): ToolSchemas {
@@ -72,7 +75,7 @@ export function collectToolSchemas(body: unknown): ToolSchemas {
   return schemas;
 }
 
-
+// ─── Tool Parameter Normalization ──────────────────────────────────────────
 
 const TOOL_PARAM_NORMALIZATION: Record<string, { primaryKey: string; aliases: string[] }> = {
   view_file: {
@@ -288,7 +291,10 @@ const TOOL_PARAM_NORMALIZATION: Record<string, { primaryKey: string; aliases: st
 
 const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
-
+/**
+ * Resolve explicit legacy aliases only. Live declarations take precedence over
+ * historical tool signatures; arbitrary values must never become file paths.
+ */
 export function normalizeToolArgs(
   name: string,
   args: Record<string, unknown> | null | undefined,
@@ -296,7 +302,7 @@ export function normalizeToolArgs(
 ): Record<string, unknown> {
   if (!args || typeof args !== 'object') return args || {};
 
-
+  // Handle array args
   if (Array.isArray(args)) {
     const config = hasOwn(TOOL_PARAM_NORMALIZATION, name) ? TOOL_PARAM_NORMALIZATION[name] : undefined;
     if (!schemas && config && args.length > 0 && typeof args[0] === 'string') {
@@ -323,20 +329,23 @@ export function normalizeToolArgs(
       .map(([, value]) => value),
   ];
   for (const [key, value] of Object.entries(args)) {
-
+    // A valid caller-defined property is never renamed to a historical alias.
     if (properties && hasOwn(properties, key)) continue;
     const rule = rules.find((candidate) => candidate.aliases.includes(key));
     if (!rule || (properties && !hasOwn(properties, rule.primaryKey))) continue;
-
+    // Keep an explicit canonical argument even if a conflicting alias follows it.
     if (!hasOwn(normalized, rule.primaryKey)) normalized[rule.primaryKey] = value;
     delete normalized[key];
   }
   return normalized;
 }
 
+// ─── Utility Functions ────────────────────────────────────────────────────
 
-
-
+/**
+ * Recursively converts Gemini parameter types (UPPERCASE) to lowercase format.
+ * Gemini uses uppercase (STRING, NUMBER); OpenAI/Anthropic need lowercase.
+ */
 export function fixParamTypes(properties: Record<string, unknown> | undefined): void {
   if (!properties) return;
   for (const key of Object.keys(properties)) {
@@ -362,10 +371,12 @@ export function fixParamTypes(properties: Record<string, unknown> | undefined): 
   }
 }
 
-
+/**
+ * Translates generic shell/terminal commands (run_command) into native Antigravity file tools.
+ */
 export function translateToolCallToNative(name: string, args: ToolCallArgs, schemas?: ToolSchemas): TranslatedToolCall {
-
-
+  // With live declarations, preserve the requested tool and its semantics.
+  // Guessing an equivalent file tool can introduce undeclared names/arguments.
   if (schemas) return { name, args: args as Record<string, unknown> };
   if (name !== 'run_command' || !args || !args.CommandLine) {
     return { name, args: args as Record<string, unknown> };
@@ -374,7 +385,7 @@ export function translateToolCallToNative(name: string, args: ToolCallArgs, sche
   const cmd = args.CommandLine.trim();
   const cwd = args.Cwd || process.cwd();
 
-
+  // 1. list_dir translation
   const isListDir = /^(ls|dir)(\s+[\w\-\/\.\*]+)*$/i.test(cmd);
   if (isListDir) {
     let dirPath = cwd;
@@ -387,7 +398,7 @@ export function translateToolCallToNative(name: string, args: ToolCallArgs, sche
     return { name: 'list_dir', args: { DirectoryPath: dirPath } };
   }
 
-
+  // 2. view_file translation
   const catMatch = /^(cat|type)\s+(["']?)(.*?)\2$/i.exec(cmd);
   if (catMatch) {
     const filePath = catMatch[3].trim();
@@ -396,7 +407,7 @@ export function translateToolCallToNative(name: string, args: ToolCallArgs, sche
     return { name: 'view_file', args: { AbsolutePath: absPath } };
   }
 
-
+  // 2b. write_file translation (echo redirect)
   const echoRedirectMatch = /^(echo|printf)\s+(.+?)\s*>\s*(.+)$/i.exec(cmd);
   if (echoRedirectMatch) {
     const content = echoRedirectMatch[2].replace(/^["']|["']$/g, '');
@@ -406,7 +417,7 @@ export function translateToolCallToNative(name: string, args: ToolCallArgs, sche
     return { name: 'write_file', args: { AbsolutePath: absPath, Content: content, Append: cmd.includes('>>') } };
   }
 
-
+  // 3. grep_search translation
   if (cmd.toLowerCase().startsWith('grep') || cmd.toLowerCase().startsWith('findstr')) {
     let query = '';
     let searchPath = cwd;
@@ -444,7 +455,9 @@ export function translateToolCallToNative(name: string, args: ToolCallArgs, sche
   return { name, args: args as Record<string, unknown> };
 }
 
-
+/**
+ * Formats native file tool outputs (JSON/Array) back into standard textual command-line outputs.
+ */
 export function formatTranslatedResponse(translatedInfo: TranslatedCallInfo, responseData: unknown): string {
   const { translatedName, cmd } = translatedInfo;
   log.info(`[Proxy] Formatting native response back to CLI for translated tool "${translatedName}" (Cmd: "${cmd}")`);

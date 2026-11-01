@@ -61,6 +61,7 @@ async function build() {
   const inputAsar = path.join(inputDir, 'app.asar');
   fs.copyFileSync(baseAsar, inputAsar);
 
+  // If app.asar.unpacked exists in resources, link or copy it so asar finds it
   const resourcesDir = path.dirname(baseAsar);
   const resourcesUnpacked = path.join(resourcesDir, 'app.asar.unpacked');
   const inputUnpacked = path.join(inputDir, 'app.asar.unpacked');
@@ -76,19 +77,21 @@ async function build() {
   asar.extractAll(inputAsar, unpackedDir);
 
   console.log('[3/5] Applying Antigravity+ modifications and patches...');
-
+  // 1. Copy dist/ -> dist/modelPatch/
   const targetModelPatch = path.join(unpackedDir, 'dist', 'modelPatch');
   ensureDir(targetModelPatch);
   copyRecursive(DIST, targetModelPatch, (src, name) => {
     return !name.endsWith('.ts') && !name.endsWith('.map') && !name.includes('__tests__');
   });
 
+  // 2. Copy assets/
   if (fs.existsSync(ASSETS)) {
     const targetAssets = path.join(unpackedDir, 'assets');
     ensureDir(targetAssets);
     copyRecursive(ASSETS, targetAssets);
   }
 
+  // 3. Apply runtime AST patches to dist/main.js and dist/preload.js
   const readVendorFile = (relPath) => fs.readFileSync(path.join(unpackedDir, relPath), 'utf8');
   const readBuildFile = (relPath) => fs.readFileSync(path.join(DIST, relPath), 'utf8');
   const runtimePatches = planRuntimePatch(readVendorFile, readBuildFile);
@@ -164,10 +167,11 @@ async function build() {
   console.log(`  ${outExe} (${(fs.statSync(outExe).size / 1024 / 1024).toFixed(2)} MB)`);
   console.log(`======================================================\n`);
 
+  // Cleanup temp build directory
   try {
     fs.rmSync(TEMP_BUILD, { recursive: true, force: true });
   } catch {
-
+    /* ignore */
   }
 }
 

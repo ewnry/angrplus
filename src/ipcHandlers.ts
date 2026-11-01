@@ -11,9 +11,11 @@ import { getIdeInstallPath } from './ideInstall/constants';
 
 import { registerCustomModelHandlers } from './customIpc';
 
-
+/**
+ * Registers all IPC handlers for the main process.
+ */
 export function registerIpcHandlers(storageManager: StorageManager): void {
-
+  // Dialog
   ipcMain.handle('dialog:open-workspace', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -32,7 +34,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     return result.canceled || result.filePaths.length === 0 ? undefined : result.filePaths;
   });
 
-
+  // Auto-updater
   ipcMain.handle('updater:get-state', () => getUpdaterState());
   ipcMain.handle('updater:apply', async () => {
     broadcastState({ type: 'ready' });
@@ -45,7 +47,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     autoUpdater.quitAndInstall();
   });
 
-
+  // Notifications
   ipcMain.handle(
     'notification:send',
     (_event, options: { title: string; body: string; silent?: boolean; payload?: unknown }) => {
@@ -71,8 +73,8 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     },
   );
 
-
-
+  // Note: copied from our desktop AGY implementation:
+  // vs/platform/nativeNotification/electron-main/electronNotificationService.ts
   ipcMain.handle('notification:open-system-preferences', async () => {
     if (process.platform === 'darwin') {
       void shell.openExternal('x-apple.systempreferences:com.apple.preference.notifications');
@@ -90,15 +92,15 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
       for (const command of commands) {
         try {
           exec(command);
-          return;
+          return; // If one command executes without immediate error, assume success for now
         } catch {
-
+          // Try next
         }
       }
     }
   });
 
-
+  // Storage
   ipcMain.handle('storage:get-items', async () => {
     return storageManager.getItems();
   });
@@ -107,7 +109,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
   });
   registerCustomModelHandlers();
 
-
+  // Logs
   ipcMain.handle('logs:electron', async () => {
     try {
       const logPath = log.transports.file.getFile().path;
@@ -118,7 +120,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
   });
 
-
+  // Sidecar extension custom scheme
   ipcMain.handle('extensions:send-authorities', async (_event, authorities: Record<string, string>) => {
     extensionAuthorities.clear();
     for (const [key, value] of Object.entries(authorities)) {
@@ -126,12 +128,12 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
   });
 
-
+  // Agent
   ipcMain.handle('agent:update-active-count', async (_event, count: number) => {
     updateTrayAgentCount(count);
   });
 
-
+  // Window
   ipcMain.handle('window:set-title-bar-overlay', async (_event, options: { color: string; symbolColor: string }) => {
     const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (win && process.platform === 'win32') {
@@ -177,12 +179,12 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     }
   });
 
-
+  // Auto-updater manual check
   ipcMain.handle('updater:check-for-updates', () => {
     checkForUpdates(true);
   });
 
-
+  // Safe external shell launch
   ipcMain.handle('shell:open-external', async (_event, url: string) => {
     if (url.startsWith('https://') || url.startsWith('http://')) {
       await shell.openExternal(url);
@@ -192,7 +194,7 @@ export function registerIpcHandlers(storageManager: StorageManager): void {
     if (typeof filePath !== 'string' || !filePath.trim() || filePath.includes('\0') || !path.isAbsolute(filePath)) {
       throw new Error('Expected an absolute filesystem path');
     }
-
+    // Do not send URLs or nonexistent paths to a platform shell.
     await fs.stat(filePath);
     shell.showItemInFolder(filePath);
   });

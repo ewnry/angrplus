@@ -17,12 +17,12 @@ export const updateActions: Record<string, (() => void) | undefined> = {
   [MenuUpdateStep.RestartToUpdate]: () => quitAndInstall(),
 };
 
-
+// True if the last call to check for updates was from a user click in the menu.
 let isManualCheck = false;
-
-const INITIAL_CHECK_DELAY_MS = 10000;
-
-const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+// How long to wait after app start before first update check (ms)
+const INITIAL_CHECK_DELAY_MS = 10000; // 10 seconds
+// How often to re-check for updates after the initial check (ms)
+const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 export interface UpdaterState {
   type: string;
@@ -31,7 +31,7 @@ export interface UpdaterState {
 
 let currentState: UpdaterState = { type: 'idle' };
 
-
+/** Return the last state, including changes emitted before a renderer subscribed. */
 export function getUpdaterState(): UpdaterState {
   return {
     ...currentState,
@@ -39,7 +39,7 @@ export function getUpdaterState(): UpdaterState {
   };
 }
 
-
+/** Broadcast a state change to every open BrowserWindow. */
 export function broadcastState(state: UpdaterState): void {
   currentState = {
     ...state,
@@ -50,7 +50,9 @@ export function broadcastState(state: UpdaterState): void {
   }
 }
 
-
+/**
+ * Updates the state of the menu item based on the current step of the updater.
+ */
 function updateMenuState(step: MenuUpdateStep): void {
   const menu = Menu.getApplicationMenu();
   if (menu) {
@@ -62,17 +64,26 @@ function updateMenuState(step: MenuUpdateStep): void {
   }
 }
 
-
+/**
+ * Initializes the auto-updater and registers IPC handlers.
+ * Call once after the first window is created.
+ *
+ * The updater will:
+ * 1. Wait INITIAL_CHECK_DELAY_MS ms, then check for updates.
+ * 2. Re-check every CHECK_INTERVAL_MS ms.
+ * 3. Download updates automatically in the background.
+ * 4. Broadcast state to the renderer so AppUpdateButton can display progress.
+ */
 export function initAutoUpdater(isHeadless: boolean): void {
-
-
+  // In dev mode (npm start), electron-updater skips checks because the app
+  // isn't packaged. Force it to use the dev config file instead.
   if (!app.isPackaged) {
     autoUpdater.forceDevUpdateConfig = true;
     autoUpdater.updateConfigPath = path.join(app.getAppPath(), 'dev-app-update.yml');
   }
-
-
-
+  // Set the channel based on architecture and OS.
+  // On Windows, we need to explicitly append '-win' to match the artifact name.
+  // On macOS and linux, Electron automatically appends the OS to the channel name.
   if (process.platform === 'win32') {
     autoUpdater.channel = `latest-${process.arch}-win`;
   } else {
@@ -80,7 +91,7 @@ export function initAutoUpdater(isHeadless: boolean): void {
   }
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = app.isPackaged;
-
+  // Auto-updater event handlers → broadcast to renderer
   autoUpdater.on('checking-for-update', () => {
     console.log('[AutoUpdater] Checking for update…');
     broadcastState({ type: 'checking for updates' });
@@ -122,7 +133,7 @@ export function initAutoUpdater(isHeadless: boolean): void {
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`[AutoUpdater] Update downloaded: ${info.version}`);
     if (isHeadless) {
-
+      // Proceed to auto install in headless mode
       if (app.isPackaged) {
         if (process.platform === 'linux') {
           const downloadedFilePath = info.downloadedFile;
@@ -147,7 +158,7 @@ export function initAutoUpdater(isHeadless: boolean): void {
     updateMenuState(MenuUpdateStep.CheckForUpdates);
     isManualCheck = false;
   });
-
+  // Schedule periodic checks
   setTimeout(() => {
     checkForUpdates();
     setInterval(checkForUpdates, CHECK_INTERVAL_MS);
@@ -165,7 +176,11 @@ export function quitAndInstall(): void {
   autoUpdater.quitAndInstall();
 }
 
-
+/**
+ * Electron native quitAndInstall doesn't relaunch the app with command line arguments.
+ * This function waits for the app process to quit, manually replaces the executable with
+ * the downloaded update, and then relaunches it with the right headless flags.
+ */
 function headlessQuitAndInstall(downloadedFilePath: string): void {
   console.log('[AutoUpdater] Headless mode: Scheduling post-quit restart.');
   try {

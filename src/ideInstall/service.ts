@@ -1,4 +1,6 @@
-
+/**
+ * IDE Install Service — Download, extract, copy, and launch logic.
+ */
 
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
@@ -10,7 +12,7 @@ import log from 'electron-log/main';
 import { fetchIdeDownloadUrl, getPlatformKey, getIdeInstallPath } from './constants';
 import { IDE_OLD_DATA_DIR, IDE_NEW_DATA_DIR } from '../paths';
 
-
+// ─── Download ──────────────────────────────────────────────────────────────
 
 export function downloadFile(
   url: string,
@@ -65,7 +67,7 @@ export function downloadFile(
   });
 }
 
-
+// ─── Extract ───────────────────────────────────────────────────────────────
 
 export async function extractIde(archivePath: string, installPath: string): Promise<void> {
   const { execFile } = await import('child_process');
@@ -114,7 +116,7 @@ export async function extractIde(archivePath: string, installPath: string): Prom
   }
 }
 
-
+// ─── Copy User Data ────────────────────────────────────────────────────────
 
 export async function copyUserData(sourcePath: string, destPath: string): Promise<void> {
   if (!fs.existsSync(sourcePath)) {
@@ -125,7 +127,7 @@ export async function copyUserData(sourcePath: string, destPath: string): Promis
   log.info(`[IDE Wizard] Copied user data: ${sourcePath} → ${destPath}`);
 }
 
-
+// ─── Download & Install (orchestrator) ─────────────────────────────────────
 
 export async function downloadAndInstallIde(): Promise<void> {
   const platformKey = getPlatformKey();
@@ -142,6 +144,6 @@ export async function downloadAndInstallIde(): Promise<void> {
   try {
     await fsPromises.unlink(tempFile);
   } catch {
-
+    /* ignore */
   }
 }

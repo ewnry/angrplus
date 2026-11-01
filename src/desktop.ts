@@ -5,6 +5,7 @@ import { getProxyPort, stopProxy } from './proxy';
 
 let installed = false;
 
+// Patch BrowserWindow constructor so DevTools is enabled even in production
 if (typeof BrowserWindow !== 'undefined' && typeof (BrowserWindow as any) === 'function') {
   try {
     const electron = require('electron');
@@ -25,7 +26,7 @@ if (typeof BrowserWindow !== 'undefined' && typeof (BrowserWindow as any) === 'f
             if (typeof this.setMenuBarVisibility === 'function') this.setMenuBarVisibility(false);
             if (typeof this.setAutoHideMenuBar === 'function') this.setAutoHideMenuBar(true);
           } catch {
-
+            /* ignore */
           }
         }
       }
@@ -34,11 +35,11 @@ if (typeof BrowserWindow !== 'undefined' && typeof (BrowserWindow as any) === 'f
       try {
         electron.BrowserWindow = PatchedBrowserWindow;
       } catch {
-
+        /* ignore */
       }
     }
   } catch {
-
+    /* ignore */
   }
 }
 
@@ -59,7 +60,7 @@ export function install(getLanguageServerPort: () => number): void {
     const { setLanguageServerPortResolver } = require('./proxy');
     setLanguageServerPortResolver(getLanguageServerPort);
   } catch {
-
+    /* ignore */
   }
 
   if (typeof process !== 'undefined' && typeof process.on === 'function') {
@@ -74,6 +75,7 @@ export function install(getLanguageServerPort: () => number): void {
   registerCustomModelHandlers();
   installThemeIcons();
 
+  // Guard loadURL on BrowserWindow.prototype against port 0 (ERR_UNSAFE_PORT)
   try {
     const electron = require('electron');
     const BW = electron.BrowserWindow || BrowserWindow;
@@ -115,9 +117,10 @@ export function install(getLanguageServerPort: () => number): void {
       }
     }
   } catch {
-
+    /* ignore */
   }
 
+  // Intercept utils.showOrCreateWindow and utils.createWindow to prevent port 0 navigation
   try {
     let utils: any;
     try {
@@ -132,7 +135,7 @@ export function install(getLanguageServerPort: () => number): void {
         utils = (module.require || require)(utilsPath);
       }
     } catch {
-
+      /* ignore */
     }
     if (utils) {
       if (typeof utils.showOrCreateWindow === 'function') {
@@ -172,7 +175,9 @@ export function install(getLanguageServerPort: () => number): void {
               url = url.replace(':0/', `:${p}/`).replace(/:0$/, `:${p}`);
               return origCreate(url, storage);
             }
-
+            // Language server has not reported its port yet.
+            // On Windows, the app 'activate' event fires during early startup when getLsPort() is 0.
+            // Main startup will open the real window once the language server is actually ready.
             console.log('[Antigravity+] Suppressed premature port 0 createWindow:', url);
             return null;
           }
@@ -181,21 +186,23 @@ export function install(getLanguageServerPort: () => number): void {
       }
     }
   } catch {
-
+    /* ignore */
   }
 
+  // Registered before the vendor's ready callback, without replacing its startup,
+  // updater, WSL integration, certificate policy, or window configuration.
   void app.whenReady().then(() => {
-
+    // Ensure local certificate trust for loopback HTTPS
     try {
       session.defaultSession.setCertificateVerifyProc((request, callback) => {
         if (request.hostname === '127.0.0.1' || request.hostname === 'localhost') {
-          callback(0);
+          callback(0); // Accept local cert
         } else {
-          callback(-3);
+          callback(-3); // Default validation
         }
       });
     } catch {
-
+      /* ignore */
     }
 
     try {
@@ -211,7 +218,7 @@ export function install(getLanguageServerPort: () => number): void {
         return origSetApplicationMenu.call(this, menu);
       };
     } catch {
-
+      /* ignore */
     }
 
     const updateAppMenu = () => {
@@ -219,6 +226,7 @@ export function install(getLanguageServerPort: () => number): void {
         const menu = Menu.getApplicationMenu();
         if (!menu) return;
 
+        // Unhide DevTools across all menus
         const unhideDevTools = (m: any) => {
           if (!m?.items) return;
           for (const item of m.items) {
@@ -270,7 +278,7 @@ export function install(getLanguageServerPort: () => number): void {
                           wc.openDevTools({ mode: 'detach' });
                         }
                       } catch {
-
+                        /* ignore */
                       }
                     }
                   },
@@ -281,7 +289,7 @@ export function install(getLanguageServerPort: () => number): void {
           Menu.setApplicationMenu(menu);
         }
       } catch {
-
+        /* ignore */
       }
     };
     updateAppMenu();
@@ -354,7 +362,7 @@ export function install(getLanguageServerPort: () => number): void {
         });
       }
     } catch {
-
+      /* ignore */
     }
 
     if (win.webContents && typeof win.webContents.on === 'function') {

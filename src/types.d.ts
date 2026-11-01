@@ -1,9 +1,9 @@
 declare namespace NodeJS {
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   interface Process extends EventEmitter {
     resourcesPath: string;
   }
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const process: Process;
   interface ErrnoException extends Error {
     code?: string;
@@ -31,12 +31,12 @@ declare namespace Electron {
     detail?: string;
     checkboxLabel?: string;
     checkboxChecked?: boolean;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
   }
 }
 
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare class EventEmitter {
   on(event: string, listener: (...args: any[]) => void): this;
   once(event: string, listener: (...args: any[]) => void): this;
@@ -46,7 +46,7 @@ declare class EventEmitter {
 }
 
 declare module 'electron' {
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export const app: {
     getPath(name: string): string;
     getAppPath(): string;
@@ -55,7 +55,7 @@ declare module 'electron' {
     commandLine: {
       appendSwitch(switchStr: string, value?: string): void;
       hasSwitch(switchStr: string): boolean;
-
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       [key: string]: any;
     };
     requestSingleInstanceLock(): boolean;
@@ -75,7 +75,7 @@ declare module 'electron' {
     };
   };
 
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export const protocol: {
     handle(scheme: string, handler: (request: any) => Promise<Response>): void;
     registerSchemesAsPrivileged(schemes: unknown[]): void;
@@ -100,7 +100,7 @@ declare module 'electron' {
 
   export interface MenuItemConstructorOptions {
     label?: string;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     click?: (...args: any[]) => void;
     type?: string;
     submenu?: MenuItemConstructorOptions[];
@@ -115,7 +115,7 @@ declare module 'electron' {
     constructor(options: MenuItemConstructorOptions);
     id: string;
     label: string;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     click: (...args: any[]) => void;
     submenu?: Menu;
     enabled: boolean;
@@ -159,27 +159,27 @@ declare module 'electron' {
   };
 
   export const contextBridge: {
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     exposeInMainWorld(key: string, api: any): void;
   };
 
   export const ipcRenderer: {
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     on(channel: string, listener: (...args: any[]) => void): void;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     once(channel: string, listener: (...args: any[]) => void): void;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     removeListener(channel: string, listener: (...args: any[]) => void): void;
     removeAllListeners(channel: string): void;
     send(channel: string, ...args: unknown[]): void;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     invoke(channel: string, ...args: unknown[]): Promise<any>;
   };
 
   export const ipcMain: {
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     on(channel: string, listener: (event: Electron.IpcMainEvent, ...args: any[]) => void): void;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     handle(channel: string, listener: (...args: any[]) => any): void;
     removeHandler(channel: string): void;
   };
@@ -192,8 +192,8 @@ declare module 'electron' {
     setZoomFactor(factor: number): void;
   };
 
-
-
+  // Type-only export for function signatures that need BrowserWindow as a type
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export type BrowserWindowType = BrowserWindowInstance;
 
   export const BrowserWindow: {
@@ -246,7 +246,7 @@ declare module 'electron' {
     on(channel: string, listener: (...args: any[]) => void): void;
     once(channel: string, listener: (...args: any[]) => void): void;
     removeListener(channel: string, listener: (...args: any[]) => void): void;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setWindowOpenHandler(handler: (details: { url: string }) => any): void;
   }
 
@@ -263,21 +263,21 @@ declare module 'electron' {
         onBeforeRequest(callback: (details: { url: string }, cb: (arg: { cancel?: boolean }) => void) => void): void;
       };
       closeAllConnections(): Promise<void>;
-
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setCertificateVerifyProc(proc: (request: any, callback: (verificationResult: number) => void) => void): void;
     };
   };
 
   export const dialog: {
     showErrorBox(title: string, content: string): void;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     showMessageBox(window: any, options?: Record<string, unknown>): Promise<{ response: number; filePaths?: string[] }>;
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     showOpenDialog(window: any, options?: Record<string, unknown>): Promise<{ canceled: boolean; filePaths: string[] }>;
   };
 
   export const net: {
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fetch(input: string | Request, init?: RequestInit): Promise<any>;
     AddressInfo: { new (): { port: number } };
   };

@@ -24,7 +24,9 @@ export function isMacOS(): boolean {
   return process.platform === 'darwin';
 }
 
-
+/**
+ * Reads the user's theme preference from the settings file.
+ */
 function getThemeMode(): string {
   try {
     const filePath = getSettingsPbPath();
@@ -47,7 +49,11 @@ function getThemeMode(): string {
   }
 }
 
-
+/**
+ * Ensures the app is visible in the dock for MacOS with the icon set.
+ * When refocusing the app after being hidden in the dock, the icon is sometimes lost.
+ * This ensures the icon is always visible.
+ */
 function ensureAppIsInDock(): void {
   void app.dock?.show();
   if (isMacOS() && app.dock) {
@@ -56,11 +62,15 @@ function ensureAppIsInDock(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Window Management
+// ---------------------------------------------------------------------------
 
-
-
-
-
+/**
+ * Creates and returns a new BrowserWindow pointed at `url`.
+ * Uses a hidden title bar with native traffic lights on macOS.
+ * Node integration is disabled and context isolation is enabled for security.
+ */
 export function createWindow(url: string): BrowserWindowInstance {
   ensureAppIsInDock();
   const theme = getThemeMode().toUpperCase();
@@ -106,7 +116,9 @@ export function createWindow(url: string): BrowserWindowInstance {
   return win;
 }
 
-
+/**
+ * Focuses a window if it exists, or creates a new one.
+ */
 export const showOrCreateWindow = (port: number): void => {
   const wins = BrowserWindow.getAllWindows();
   if (wins.length > 0) {
@@ -117,7 +129,9 @@ export const showOrCreateWindow = (port: number): void => {
   }
 };
 
-
+/**
+ * Manages the power save blocker to keep the computer awake.
+ */
 export class SleepBlocker {
   private static instance: SleepBlocker;
   private currentBlockerId: number | null = null;
@@ -176,13 +190,16 @@ export function getNodeWrapperPaths(
   };
 }
 
-
+/**
+ * Sets up a wrapper script for Node.js that runs Electron as Node.
+ * This allows running standard Node scripts using the Electron binary.
+ */
 export function setupNodeWrapper(env: Record<string, string | undefined>): void {
   const userDataPath = app.isPackaged ? app.getPath('userData') : '';
-
-
-
-
+  // Windows environment variables are case-insensitive, but when copying process.env
+  // into a plain object, we might get 'Path' instead of 'PATH'. We need to find
+  // the actual key used to avoid creating case-duplicate keys (e.g. 'Path' and 'PATH')
+  // which can confuse child_process.spawn on Windows.
   const isWindows = process.platform === 'win32';
   const pathKey = isWindows ? Object.keys(env).find((k) => k.toUpperCase() === 'PATH') || 'PATH' : 'PATH';
   const { newEnvPath, nodeWrapperPath, binPath } = getNodeWrapperPaths(
@@ -193,7 +210,7 @@ export function setupNodeWrapper(env: Record<string, string | undefined>): void 
     __dirname,
   );
   env[pathKey] = newEnvPath;
-
+  // In non-packaged dev mode, we don't create a wrapper and it'll just use machine node
   if (!nodeWrapperPath || !binPath) {
     return;
   }
@@ -206,9 +223,9 @@ export function setupNodeWrapper(env: Record<string, string | undefined>): void 
       nodeWrapperContent = `@echo off\nset ELECTRON_RUN_AS_NODE=1\n"${process.execPath}" %*\n`;
       break;
     case 'darwin': {
-
-
-
+      // Use the Helper app instead of the main executable to prevent macOS
+      // from bouncing a new Dock icon when this script is executed. The Helper
+      // has LSUIElement=true in its Info.plist, running it invisibly.
       const appName = path.basename(process.execPath);
       let electronBinary = process.execPath;
       const helperPath = path.join(
@@ -226,7 +243,7 @@ export function setupNodeWrapper(env: Record<string, string | undefined>): void 
       nodeWrapperContent = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${electronBinary}" "$@"\n`;
       break;
     }
-    default:
+    default: // linux, etc.
       nodeWrapperContent = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${process.execPath}" "$@"\n`;
       break;
   }

@@ -1,4 +1,4 @@
-
+/** Backward-compatible model storage shared by the addon and proxy. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -27,7 +27,7 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-
+/** Accept flat legacy files and provider-group exports without losing model overrides. */
 export function normalizeModelConfig(payload: unknown): ModelEntry[] {
   let value = payload;
   if (typeof value === 'string') {
@@ -129,7 +129,7 @@ export function redactModel(model: ModelEntry): ModelEntry {
   return result;
 }
 
-
+/** All writes are synchronous atomic read/modify/write operations, including bulk imports. */
 export class ModelStore {
   constructor(
     readonly filename: string,
@@ -281,7 +281,7 @@ export class ModelStore {
         const model = { ...entry };
         delete model.apiKey;
         delete model.encrypted;
-
+        // Headers may contain arbitrary credentials; require re-entry after export.
         delete model.customHeaders;
         delete model.extraHeaders;
         delete model.encryptedHeaders;

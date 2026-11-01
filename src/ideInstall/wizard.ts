@@ -1,4 +1,6 @@
-
+/**
+ * IDE Install Wizard — Window orchestration and IPC handlers.
+ */
 
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
@@ -10,7 +12,10 @@ import { copyUserData, downloadAndInstallIde } from './service';
 import { getWizardHtml } from './wizardHtml';
 import { StorageManager } from '../storage';
 
-
+/**
+ * Shows the IDE install wizard as a modal window.
+ * Returns a promise that resolves when the wizard is dismissed.
+ */
 export function showIdeInstallWizard(): Promise<void> {
   return new Promise((resolve) => {
     const wizardWindow = new BrowserWindow({
@@ -71,8 +76,8 @@ export function showIdeInstallWizard(): Promise<void> {
     });
 
     const doSetup = async () => {
-
-
+      // If the old Antigravity user data directory exists, copy it to the new IDE
+      // data dir and to a backup directory.
       if (fs.existsSync(IDE_OLD_DATA_DIR)) {
         if (!fs.existsSync(IDE_NEW_DATA_DIR)) {
           try {
@@ -103,7 +108,11 @@ export function showIdeInstallWizard(): Promise<void> {
   });
 }
 
-
+/**
+ * Checks conditions and shows the IDE install wizard if appropriate.
+ * This should be called early in the app lifecycle, before the LS starts.
+ * Returns true if the wizard was shown, false otherwise.
+ */
 export async function maybeShowIdeInstallWizard(storageManager: StorageManager): Promise<boolean> {
   const shouldShow = await shouldShowIdeInstallWizard(storageManager);
   if (!shouldShow) {

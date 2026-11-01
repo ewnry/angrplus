@@ -50,7 +50,7 @@ class Cdp {
   close() { this.rejectAll(); this.socket?.close(); }
 }
 
-
+// This runs only in the dedicated Gemini tab. Never reads cookies or account tokens.
 export function inspectGeminiPage() {
   const visible = (e: Element) => !!(e as HTMLElement).getClientRects().length;
   const editor = Array.from(document.querySelectorAll('rich-textarea [contenteditable="true"], [contenteditable="true"][role="textbox"]')).find(visible);
@@ -121,7 +121,7 @@ export class GeminiWeb {
     let tabs: any[];
     try { tabs = await this.tabs(); } catch {
       await this.open('background');
-      for (let i = 0; i < 24; i++) { await pause(500); try { tabs = await this.tabs(); break; } catch {  } }
+      for (let i = 0; i < 24; i++) { await pause(500); try { tabs = await this.tabs(); break; } catch { /* starting */ } }
       if (!tabs) throw new Error('GEMINI_SIGN_IN_REQUIRED: Open sign-in, log in, then close the sign-in window. Cowork will reconnect automatically.');
     }
     const tab = tabs.find(t => t.type === 'page' && isGeminiPage(t.url));
@@ -139,24 +139,24 @@ export class GeminiWeb {
           const tab=(await this.tabs()).find(t=>t.type==='page'&&isGeminiPage(t.url));
           if(tab){const page=new Cdp();await page.connect(tab.webSocketDebuggerUrl);try{await this.ensureIdle(page);restoreUrl=tab.url;}catch{return {opened:true,message:'Existing Gemini request or draft preserved.'};}finally{page.close();}}
           const cdp = new Cdp(); await cdp.connect(version.webSocketDebuggerUrl);
-          try { await cdp.call('Browser.close'); } catch {  } finally { cdp.close(); }
+          try { await cdp.call('Browser.close'); } catch { /* browser is closing */ } finally { cdp.close(); }
           await pause(1500);
         } else {
           return { opened: true, message: 'Dedicated browser is connected in the background.' };
         }
       } else {
         const cdp = new Cdp(); await cdp.connect(version.webSocketDebuggerUrl);
-        try { await cdp.call('Browser.close'); } catch {  } finally { cdp.close(); }
+        try { await cdp.call('Browser.close'); } catch { /* closing disconnects CDP */ } finally { cdp.close(); }
         await pause(1500);
       }
-    } catch {  }
+    } catch { /* not running */ }
     const candidates = process.platform === 'win32' ? [
       path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
       path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
       path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
     ] : process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'] : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge'];
     let browser: string;
-    for (const candidate of candidates) { try { await fs.access(candidate); browser = candidate; break; } catch {  } }
+    for (const candidate of candidates) { try { await fs.access(candidate); browser = candidate; break; } catch { /* next */ } }
     if (!browser) throw new Error('Install Chrome, Chromium or Edge to use Gemini Web.');
     await fs.mkdir(this.profile, { recursive: true, mode: 0o700 });
     const child = spawn(browser, [`--user-data-dir=${this.profile}`, ...(mode !== 'signin' ? ['--headless=new', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--disable-gpu', '--mute-audio', '--window-size=1100,800', '--disable-extensions', '--disable-sync'] : []), '--disable-background-mode', '--no-first-run', '--no-default-browser-check', restoreUrl], { detached: true, stdio: 'ignore', windowsHide: true });
@@ -278,7 +278,7 @@ export class GeminiWeb {
   private async ensureIdle(cdp: Cdp) {
     if (this.busy) throw new Error('Wait for the current Gemini request to finish.');
     let locked = false;
-    try { await fs.access(path.join(this.profile, 'mcp-request.lock')); locked = true; } catch {  }
+    try { await fs.access(path.join(this.profile, 'mcp-request.lock')); locked = true; } catch { /* no local request */ }
     if (locked) throw new Error('Another Gemini Web request is active.');
     const state = await cdp.evaluate(`(${inspectGeminiPage.toString()})()`);
     if (state.busy) throw new Error('Gemini Web is generating.');
@@ -306,7 +306,7 @@ export class GeminiWeb {
             await cdp.evaluate('delete window.__agyPreviousGeminiTurn');
             return { ...current, messages:current.messages.map((m:any)=>({...m,media:m.media.map(({src,...item}:any)=>item)})), ready: true, busy: state.busy, model: state.model };
           }
-        } catch {  }
+        } catch { /* document is navigating */ }
       }
       throw new Error('Gemini chat is still loading. Refresh Cowork in a moment.');
     } finally { cdp.close(); }

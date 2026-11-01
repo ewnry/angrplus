@@ -1,4 +1,8 @@
-
+/**
+ * Antigravity+ In-App Update Engine.
+ * Checks for updates via Cloudflare Worker / custom endpoint, downloads the installer,
+ * and launches it headlessly with --updating to patch and relaunch seamlessly.
+ */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -45,7 +49,10 @@ export interface DownloadedUpdate {
   type: 'asar' | 'installer';
 }
 
-
+/**
+ * Compares two semantic version strings (e.g. "2.1.1" vs "2.1.0").
+ * Returns 1 if v1 > v2, -1 if v1 < v2, and 0 if equal.
+ */
 export function compareVersions(v1: string, v2: string): number {
   const clean = (v: string) =>
     v
@@ -120,7 +127,9 @@ function fetchUrl(targetUrl: string, maxRedirects = 5): Promise<{ status: number
   });
 }
 
-
+/**
+ * Checks the update server for a newer release.
+ */
 export async function checkForUpdates(serverUrl = DEFAULT_UPDATE_SERVER_URL): Promise<UpdateCheckResult> {
   const current = ANTIGRAVITY_PLUS_VERSION;
   const normalizedServer = serverUrl.replace(/\/+$/, '');
@@ -182,15 +191,17 @@ export async function checkForUpdates(serverUrl = DEFAULT_UPDATE_SERVER_URL): Pr
   }
 }
 
-
+/**
+ * Locates the current active Antigravity app.asar across Windows, macOS, and Linux.
+ */
 export function getAppAsarPath(): string {
-
+  // 1. Electron's process.resourcesPath
   if (process.resourcesPath) {
     const candidate = path.join(process.resourcesPath, 'app.asar');
     if (fs.existsSync(candidate)) return candidate;
   }
 
-
+  // 2. Windows standard paths
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
     const candidates = [
@@ -203,7 +214,7 @@ export function getAppAsarPath(): string {
     }
   }
 
-
+  // 3. macOS standard paths
   if (process.platform === 'darwin') {
     const macCandidates = [
       '/Applications/Antigravity.app/Contents/Resources/app.asar',
@@ -216,7 +227,7 @@ export function getAppAsarPath(): string {
     }
   }
 
-
+  // 4. Linux standard paths
   if (process.platform === 'linux') {
     const linuxCandidates = [
       '/opt/Antigravity/resources/app.asar',
@@ -232,7 +243,9 @@ export function getAppAsarPath(): string {
   return path.join(process.resourcesPath || '', 'app.asar');
 }
 
-
+/**
+ * Determines the executable binary or application bundle to relaunch after patching.
+ */
 export function getRestartExecutable(targetAsarPath?: string): { execPath: string; appBundle?: string } {
   const currentExec = process.execPath;
   const isNode = currentExec && (currentExec.toLowerCase().endsWith('node.exe') || currentExec.toLowerCase().endsWith('node'));
@@ -260,7 +273,7 @@ export function getRestartExecutable(targetAsarPath?: string): { execPath: strin
     return { execPath: exeCandidate };
   }
 
-
+  // Linux
   const linuxExe = path.join(appRoot, 'antigravity');
   if (fs.existsSync(linuxExe)) {
     return { execPath: linuxExe };
@@ -289,7 +302,10 @@ export function readAsarPackageVersion(buf: Buffer): string {
   return pkg.version;
 }
 
-
+/**
+ * Downloads an update package (.asar, .asar.gz, or .exe).
+ * Automatically decompresses gzip if needed and determines update type ('asar' vs 'installer').
+ */
 export function downloadUpdate(
   downloadUrl: string,
   onProgress?: (progress: DownloadProgress) => void,
@@ -363,7 +379,7 @@ export function downloadUpdate(
             try {
               let finalBuffer = fs.readFileSync(rawDownloadPath);
 
-
+              // Check if GZipped (0x1f 0x8b)
               if (finalBuffer.length >= 2 && finalBuffer[0] === 0x1f && finalBuffer[1] === 0x8b) {
                 try {
                   finalBuffer = zlib.gunzipSync(finalBuffer);
@@ -373,28 +389,28 @@ export function downloadUpdate(
                 }
               }
 
-
+              // Check if ASAR package
               if (isValidAsarBuffer(finalBuffer)) {
                 const targetAsar = path.join(tempDir, `app.asar.update_${Date.now()}`);
                 fs.writeFileSync(targetAsar, finalBuffer);
                 try {
                   fs.unlinkSync(rawDownloadPath);
                 } catch {
-
+                  /* ignore */
                 }
                 log.info(`[PlusUpdater] Downloaded and verified ASAR package: ${targetAsar} (${finalBuffer.length} bytes)`);
                 resolve({ filePath: targetAsar, type: 'asar' });
                 return;
               }
 
-
+              // Check if Windows PE executable ('MZ' = 0x4d 0x5a)
               if (finalBuffer.length >= 2 && finalBuffer[0] === 0x4d && finalBuffer[1] === 0x5a) {
                 const targetExe = path.join(tempDir, `AntigravityPlus_Update_${Date.now()}.exe`);
                 fs.writeFileSync(targetExe, finalBuffer);
                 try {
                   fs.unlinkSync(rawDownloadPath);
                 } catch {
-
+                  /* ignore */
                 }
                 log.info(`[PlusUpdater] Downloaded Windows setup installer: ${targetExe} (${finalBuffer.length} bytes)`);
                 resolve({ filePath: targetExe, type: 'installer' });
@@ -416,7 +432,7 @@ export function downloadUpdate(
           try {
             if (fs.existsSync(rawDownloadPath)) fs.unlinkSync(rawDownloadPath);
           } catch {
-
+            /* ignore */
           }
           reject(err);
         });
@@ -430,7 +446,10 @@ export function downloadUpdate(
   });
 }
 
-
+/**
+ * Downloads the update installer executable to %TEMP% with progress feedback.
+ * Provided for backwards compatibility with previous callers and tests.
+ */
 export async function downloadUpdateInstaller(
   downloadUrl: string,
   onProgress?: (progress: DownloadProgress) => void,
@@ -439,7 +458,12 @@ export async function downloadUpdateInstaller(
   return result.filePath;
 }
 
-
+/**
+ * Direct in-app ASAR hot-updater.
+ * Swaps app.asar directly without running the external C# setup executable.
+ * Spawns a detached background helper script that waits for Antigravity to quit,
+ * creates a vanilla backup if missing, atomically replaces app.asar, and relaunches the app.
+ */
 export function applyDirectAsarUpdate(newAsarPath: string): void {
   if (!fs.existsSync(newAsarPath)) {
     throw new Error(`New ASAR file not found at ${newAsarPath}`);
@@ -509,7 +533,7 @@ try {
     updateHelper = child;
     child.unref();
   } else {
-
+    // macOS / Linux
     const shPath = path.join(tempDir, `ag_hotupdate_${Date.now()}.sh`);
     const isMac = process.platform === 'darwin' ? 1 : 0;
     const bundlePath = appBundle || '';
@@ -554,7 +578,7 @@ rm -f "$0"
     child.unref();
   }
 
-
+  // Gracefully quit application to release file locks
   updateHelper.once('spawn', () => setTimeout(() => {
     log.info('[PlusUpdater] Exiting Antigravity process for hot-swap...');
     const appAny = app as any;
@@ -566,7 +590,9 @@ rm -f "$0"
   }, 300));
 }
 
-
+/**
+ * Launches the installer executable in headless updating mode (--updating) and quits Antigravity.
+ */
 export function applyUpdateAndRestart(installerPath: string): void {
   if (!fs.existsSync(installerPath)) {
     throw new Error(`Installer executable not found at ${installerPath}`);
