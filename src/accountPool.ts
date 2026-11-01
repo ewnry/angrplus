@@ -1026,6 +1026,7 @@ let activeOAuthAbort: AbortController | null = null;
  * Initiates interactive Google Login in browser to add a new account to the pool.
  */
 export async function startAddGoogleAccountFlow(openExternal: (url: string) => Promise<unknown>): Promise<PooledAccount> {
+  if (!ANTIGRAVITY_CLIENT_ID || !ANTIGRAVITY_CLIENT_SECRET) throw new Error('Account Pool is unavailable in the GitHub build until ANTIGRAVITY_OAUTH_CLIENT_ID and ANTIGRAVITY_OAUTH_CLIENT_SECRET are configured.');
   activeOAuthAbort?.abort();
   activeOAuthAbort = new AbortController();
 

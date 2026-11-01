@@ -172,3 +172,5 @@ Distributed under the **Apache-2.0** License. See [LICENSE](LICENSE) for details
 ### OAuth configuration for source builds
 
 OAuth client credentials are intentionally omitted from this repository. Supply valid credentials through `ANTIGRAVITY_OAUTH_CLIENT_ID` and `ANTIGRAVITY_OAUTH_CLIENT_SECRET` in the environment where the application runs. The build warns when either variable is absent; Google account login and token refresh require working credentials. Do not commit credentials or print them in build logs.
+
+The GitHub release does not include Google OAuth credentials. Account Pool login is unavailable until those environment variables are configured. Other releases are distributed separately.
