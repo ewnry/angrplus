@@ -6,8 +6,8 @@
   <strong>Multi-account quota pooling, zero-hang hot-swapping & refined UI for Google Antigravity</strong>
 </p>
 
-[![Version](https://img.shields.io/badge/version-2.1.17-blue.svg?style=for-the-badge&logo=electron)](https://github.com/ewnry/angrplus)
-[![Antigravity](https://img.shields.io/badge/Antigravity-v2.28.0-purple.svg?style=for-the-badge)](https://github.com/ewnry/angrplus)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fag.rak.wtf%2Fapi%2Fversion&query=%24.version&label=Antigravity%2B&color=blue&style=for-the-badge&logo=electron)](https://github.com/ewnry/angrplus)
+[![Antigravity](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fag.rak.wtf%2Fapi%2Fversion&query=%24.testedAppVersions%5B0%5D&label=Antigravity&color=purple&style=for-the-badge)](https://github.com/ewnry/angrplus)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-orange.svg?style=for-the-badge)](LICENSE)
