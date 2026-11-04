@@ -57,7 +57,7 @@ function createFixture(response: Response, models: unknown[] = [customModel]) {
       if (id !== 'electron') throw new Error(`Unexpected preload dependency: ${id}`);
       return {
         contextBridge: { exposeInMainWorld },
-        ipcRenderer: { invoke: getModels },
+        ipcRenderer: { invoke: (channel: string, ...args: unknown[]) => channel === 'storage:get-custom-models' ? getModels(channel, ...args) : Promise.resolve(null) },
         webFrame: {},
       };
     },

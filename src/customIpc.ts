@@ -26,6 +26,19 @@ export function registerCustomModelHandlers(): void {
       }
     });
   };
+  const channelStatePath = path.join(app.getPath('userData'), 'antigravity-plus-channels.json');
+  const channelVersion = () => `${require('./plusUpdater').ANTIGRAVITY_PLUS_VERSION}/${app.getVersion()}`;
+  const readChannelState = (): { shownVersion?: string; opened?: Record<string, boolean> } => {
+    try { return JSON.parse(require('node:fs').readFileSync(channelStatePath, 'utf8')); } catch { return {}; }
+  };
+  const saveChannelState = (state: object) => require('node:fs').writeFileSync(channelStatePath, JSON.stringify(state, null, 2));
+  handle('plus-channels:status', () => { const state = readChannelState(); return { success: true, show: state.shownVersion !== channelVersion(), opened: state.opened || {} }; });
+  handle('plus-channels:open', async (key: string) => {
+    const links: Record<string, string> = { angrplus: 'https://t.me/AnGrPlus', unixmk: 'https://t.me/unixmk' };
+    if (!Object.prototype.hasOwnProperty.call(links, key)) throw new Error('Unknown channel');
+    await shell.openExternal(links[key]); const state = readChannelState(); state.opened = { ...state.opened, [key]: true }; saveChannelState(state); return { success: true };
+  });
+  handle('plus-channels:dismiss', () => { const state = readChannelState(); state.shownVersion = channelVersion(); saveChannelState(state); return { success: true }; });
   const customizationFile = path.join(app.getPath('home'), '.gemini', 'antigravity', 'plus-customizations.json');
   const readCustomizations = () => {
     const fs = require('node:fs');
@@ -208,7 +221,7 @@ export function registerCustomModelHandlers(): void {
       soundTheme: cfg.soundTheme || 'ps5-notification.mp3',
       updateServerUrl: cfg.updateServerUrl || 'https://antigravity-plus-updates.unalty-api.workers.dev',
       autoCheckUpdates: cfg.autoCheckUpdates !== false,
-      uiThemeMode: cfg.uiThemeMode || 'antigravity',
+      uiThemeMode: cfg.uiThemeMode === 'antigravity-old' ? 'antigravity-flatnew' : cfg.uiThemeMode || 'antigravity',
       promptEngineMode: cfg.promptEngineMode || 'antigravity',
       customPromptText: cfg.customPromptText || '',
       appVersion: plusUpdater?.ANTIGRAVITY_PLUS_VERSION || '2.1.0',
@@ -397,8 +410,7 @@ export function registerCustomModelHandlers(): void {
 
   handle('plus:check-update', async (customUrl?: string) => {
     if (!plusUpdater) return { success: false, updateAvailable: false, error: 'Updater module not available' };
-    const cfg = accountPool?.loadPoolConfig();
-    const url = customUrl || cfg?.updateServerUrl || plusUpdater.DEFAULT_UPDATE_SERVER_URL;
+    const url = customUrl || plusUpdater.DEFAULT_UPDATE_SERVER_URL;
     return await plusUpdater.checkForUpdates(url);
   });
 
@@ -418,24 +430,21 @@ export function registerCustomModelHandlers(): void {
         }
       };
 
-      let url = targetUrl;
-      if (!url) {
-        const cfg = accountPool?.loadPoolConfig();
-        const serverUrl = cfg?.updateServerUrl || plusUpdater.DEFAULT_UPDATE_SERVER_URL;
-        const check = await plusUpdater.checkForUpdates(serverUrl);
-        url = check.asarUrl || check.downloadUrl;
-      }
+      const check = await plusUpdater.checkForUpdates(plusUpdater.DEFAULT_UPDATE_SERVER_URL);
+      if (!check.success || !check.updateAvailable) return { success: false, error: check.error || 'No update is available.' };
+      const url = check.downloadUrl;
+      if (targetUrl && targetUrl !== url) return { success: false, error: 'The update changed. Check for updates again.' };
 
       if (!url) {
         return { success: false, error: 'No update URL specified or available' };
       }
 
       const downloaded = await plusUpdater.downloadUpdate(url, onProgress);
-      if (downloaded.type === 'asar') {
-        plusUpdater.applyDirectAsarUpdate(downloaded.filePath);
-      } else {
-        plusUpdater.applyUpdateAndRestart(downloaded.filePath);
-      }
+      if (downloaded.type !== 'installer') throw new Error('The update server did not provide a compatible installer.');
+      if (!/^[a-f0-9]{64}$/i.test(check.installerSha256 || '')) throw new Error('The update manifest has no installer checksum.');
+      const hash = require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(downloaded.filePath)).digest('hex');
+      if (hash.toLowerCase() !== check.installerSha256!.toLowerCase()) throw new Error('Update checksum mismatch. The installed application was not changed.');
+      plusUpdater.applyUpdateAndRestart(downloaded.filePath);
       return { success: true, filePath: downloaded.filePath, type: downloaded.type };
     } catch (err: any) {
       return { success: false, error: err?.message || String(err) };

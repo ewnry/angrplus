@@ -1,102 +1,47 @@
-import { BrowserWindow, WebContentsView, type BrowserWindowInstance } from 'electron';
+import { WebContentsView, type BrowserWindowInstance } from 'electron';
 
-/**
- * Generates the HTML content for the initial loading screen overlay.
- * This is injected into a WebContentsView and shown to the user before
- * the main application bundle finishes loading.
- *
- * @param foregroundColor - The text and loader animation color (hex or CSS color string).
- * @param backgroundColor - The background color of the loading view.
- */
-function getLoadingHtml(foregroundColor: string, backgroundColor: string): string {
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-  body {
-    margin: 0;
-    padding: 0;
-    background: ${backgroundColor};
-    color: ${foregroundColor};
-    font-family: system-ui, -apple-system, sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    overflow: hidden;
-    -webkit-app-region: drag;
-    -webkit-user-select: none;
-  }
-  .loader {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-  .loader div {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: ${foregroundColor};
-    opacity: 0.3;
-    animation: dot-pulse 1.5s infinite ease-in-out;
-  }
-  .loader div:nth-child(1) { animation-delay: 0s; }
-  .loader div:nth-child(2) { animation-delay: 0.3s; }
-  .loader div:nth-child(3) { animation-delay: 0.6s; }
-  .text {
-    font-size: 13px;
-    font-weight: 400;
-    letter-spacing: 0.03em;
-    opacity: 0.6;
-  }
-  @keyframes dot-pulse {
-    0%, 100% { opacity: 0.2; transform: scale(0.9); }
-    50% { opacity: 0.7; transform: scale(1.1); }
-  }
-</style>
-</head>
-<body>
-  <div class="loader">
-    <div></div><div></div><div></div>
-  </div>
-  <div class="text">Loading Antigravity</div>
-</body>
-</html>
-  `;
+export const MINIMUM_SPLASH_MS = 1800;
+
+export function getLoadingHtml(foregroundColor: string, backgroundColor: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: grid; place-items: center; overflow: hidden;
+      background: ${backgroundColor}; color: ${foregroundColor}; font-family: system-ui, -apple-system, sans-serif;
+      -webkit-app-region: drag; user-select: none; }
+    .brand { display: flex; align-items: center; justify-content: center; }
+    .mark { width: 66px; height: 66px; flex: none; position: relative; animation: mark-in .35s ease-out both; }
+    .mark svg { width: 100%; height: 100%; }
+    .badge { position: absolute; right: 3px; top: 5px; width: 16px; height: 16px;
+      color: inherit; opacity: 0; transform: scale(.3); animation: badge-in .34s .38s cubic-bezier(.2,1.5,.4,1) forwards; }
+    .word-wrap { overflow: hidden; max-width: 0; animation: reveal .55s .78s cubic-bezier(.2,.7,.2,1) forwards; }
+    .word { display: flex; align-items: baseline; white-space: nowrap; padding-left: 8px;
+      font-size: 26px; letter-spacing: -.035em; font-weight: 500; }
+    .plus { display: inline-block; opacity: 0; animation: drop .4s 1.3s cubic-bezier(.2,.8,.3,1.25) forwards; }
+    @keyframes mark-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+    @keyframes badge-in { to { opacity: 1; transform: scale(1); } }
+    @keyframes reveal { to { max-width: 240px; } }
+    @keyframes drop { from { opacity: 0; transform: translateY(-15px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { .mark, .badge, .word-wrap, .plus { animation: none; opacity: 1; transform: none; } .word-wrap { max-width: 240px; } }
+  </style></head><body><div class="brand" role="status" aria-label="Loading Antigravity Plus">
+    <div class="mark"><svg viewBox="0 0 180 180" aria-hidden="true"><path fill="currentColor" d="M144.248 149.062C151.748 154.688 162.998 150.938 152.685 140.625C121.748 110.625 128.31 28.125 89.8727 28.125C51.4352 28.125 57.9977 110.625 27.0602 140.625C15.8102 151.875 27.9977 154.688 35.4977 149.062C64.5602 129.375 62.6852 94.6875 89.8727 94.6875C117.06 94.6875 115.185 129.375 144.248 149.062Z"/></svg>
+      <svg class="badge" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg></div>
+    <div class="word-wrap"><div class="word">Antigravity<span class="plus">+</span></div></div>
+  </div></body></html>`;
 }
 
-/**
- * Attaches a temporary WebContentsView overlay that shows a loading animation.
- * It is automatically removed when the window's main content finishes loading.
- */
-export function attachLoadingOverlay(
-  win: BrowserWindowInstance,
-  foregroundColor: string,
-  backgroundColor: string,
-): void {
-  const view = new WebContentsView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  });
-  const html = getLoadingHtml(foregroundColor, backgroundColor);
-  void view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+export function attachLoadingOverlay(win: BrowserWindowInstance, foregroundColor: string, backgroundColor: string): void {
+  const view = new WebContentsView({ webPreferences: { nodeIntegration: false, contextIsolation: true } });
+  const started = Date.now();
+  void view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getLoadingHtml(foregroundColor, backgroundColor))}`);
   win.contentView.addChildView(view);
-  const updateBounds = () => {
-    const [width, height] = win.getContentSize();
-    view.setBounds({ x: 0, y: 0, width, height });
-  };
+  const updateBounds = () => { if (!win.isDestroyed()) { const [width, height] = win.getContentSize(); view.setBounds({ x: 0, y: 0, width, height }); } };
   updateBounds();
   win.on('resize', updateBounds);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cleanup = () => { if (timer) clearTimeout(timer); win.off('resize', updateBounds); if (!win.isDestroyed()) { try { win.contentView.removeChildView(view); } catch { /* Window already closed. */ } } const contents = view.webContents as any; if (!contents.isDestroyed()) contents.close(); };
+  win.once('closed', cleanup);
   win.webContents.once('did-finish-load', () => {
-    try {
-      win.contentView.removeChildView(view);
-    } catch (_) {
-      // In case window was closed quickly
-    }
-    win.off('resize', updateBounds);
+    timer = setTimeout(() => { win.off('closed', cleanup); cleanup(); }, Math.max(0, MINIMUM_SPLASH_MS - (Date.now() - started)));
   });
 }
+

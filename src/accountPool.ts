@@ -58,7 +58,7 @@ export interface PooledAccount {
 
 export type QuotaDisplayMode = 'normalized' | 'additive' | 'active';
 export type PromptEngineMode = 'antigravity' | 'claude' | 'custom';
-export type UIThemeMode = 'antigravity' | 'claude';
+export type UIThemeMode = 'antigravity' | 'antigravity-old' | 'antigravity-flatnew' | 'claude';
 
 export interface AccountPoolConfig {
   activeAccountId?: string;

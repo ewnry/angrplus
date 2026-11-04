@@ -92,6 +92,7 @@ describe('plusUpdater', () => {
               version: '99.0.0',
               downloadUrl: '/api/download',
               asarUrl: '/app.asar.gz',
+              installerSha256: 'a'.repeat(64),
               changelog: 'Super update',
               releaseDate: '2026-10-15',
             }),
@@ -112,6 +113,7 @@ describe('plusUpdater', () => {
         expect(result.updateAvailable).toBe(true);
         expect(result.latestVersion).toBe('99.0.0');
         expect(result.downloadUrl).toBe(`${serverUrl}/api/download`);
+        expect(result.installerSha256).toBe('a'.repeat(64));
         expect(result.asarUrl).toBe(`${serverUrl}/app.asar.gz`);
         expect(result.changelog).toBe('Super update');
       } finally {

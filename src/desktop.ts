@@ -55,6 +55,12 @@ export function install(getLanguageServerPort: () => number): void {
   if (installed) return;
   installed = true;
   enableVendorDevTools();
+  try {
+    const vendorLoading = (module.require || require)(['..', 'loadingOverlay'].join('/'));
+    vendorLoading.attachLoadingOverlay = require('./loadingOverlay').attachLoadingOverlay;
+  } catch (error) {
+    console.error('[Antigravity+] Could not install loading animation:', error);
+  }
 
   try {
     const { setLanguageServerPortResolver } = require('./proxy');
@@ -392,3 +398,4 @@ export function install(getLanguageServerPort: () => number): void {
     void stopProxy();
   });
 }
+

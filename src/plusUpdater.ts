@@ -14,8 +14,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { app } from 'electron';
 import log from 'electron-log';
 
-export const ANTIGRAVITY_PLUS_VERSION = '2.1.17';
-export const DEFAULT_UPDATE_SERVER_URL = 'https://antigravity-plus-updates.unalty-api.workers.dev';
+export const ANTIGRAVITY_PLUS_VERSION = '2.1.18';
+export const DEFAULT_UPDATE_SERVER_URL = 'https://ag.rak.wtf';
 
 export interface RemoteVersionInfo {
   version: string;
@@ -24,6 +24,7 @@ export interface RemoteVersionInfo {
   changelog?: string;
   releaseDate?: string;
   minAppVersion?: string;
+  installerSha256?: string;
 }
 
 export interface UpdateCheckResult {
@@ -36,6 +37,7 @@ export interface UpdateCheckResult {
   changelog?: string;
   releaseDate?: string;
   error?: string;
+  installerSha256?: string;
 }
 
 export interface DownloadProgress {
@@ -178,6 +180,7 @@ export async function checkForUpdates(serverUrl = DEFAULT_UPDATE_SERVER_URL): Pr
       asarUrl,
       changelog: info.changelog || 'Performance improvements and bug fixes.',
       releaseDate: info.releaseDate,
+      installerSha256: info.installerSha256,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -597,13 +600,15 @@ export function applyUpdateAndRestart(installerPath: string): void {
   if (!fs.existsSync(installerPath)) {
     throw new Error(`Installer executable not found at ${installerPath}`);
   }
+  if (process.platform !== 'win32') throw new Error('Automatic installation is available on Windows; use the platform installer on Linux or macOS.');
+  cp.execFileSync(installerPath, ['--check'], { timeout: 120000, windowsHide: true, stdio: 'pipe' });
 
   log.info(`[PlusUpdater] Spawning update installer: ${installerPath} --updating`);
 
   const child = cp.spawn(installerPath, ['--updating'], {
     detached: true,
     stdio: 'ignore',
-    windowsHide: true,
+    windowsHide: false,
   });
   child.once('error', (error) => log.error('[PlusUpdater] Could not launch installer:', error));
   child.unref();

@@ -41,6 +41,114 @@ function models(f: ReturnType<typeof fixture>) {
 }
 
 describe('Claude composer DOM stability', () => {
+  it('shows the patch version beside the native app version and avoids duplicate rows', () => {
+    const f = fixture();
+    const menu = f.document.createElement('div');
+    menu.innerHTML = '<div><button data-testid="title-menu-bar-option">Version 2.29.0</button></div><div><button data-testid="title-menu-bar-option">Check for Updates</button></div>';
+    f.document.body.append(menu);
+    runInContext('injectPlusMenuVersion("2.1.18"); injectPlusMenuVersion("2.1.18")', f.context);
+    expect(menu.querySelectorAll('#agy-plus-menu-version')).toHaveLength(1);
+    expect(menu.children[1].textContent).toBe('Antigravity+ 2.1.18');
+    expect(menu.children[2].textContent).toBe('Check for Updates');
+    menu.remove();
+    runInContext('injectPlusMenuVersion("2.1.18")', f.context);
+    expect(f.document.getElementById('agy-plus-menu-version')).toBeNull();
+  });
+  it('shows Telegram invitation inside the page and saves its dismissal', async () => {
+    const f = fixture();
+    const invoke = vi.fn(async (channel: string) => channel === 'plus-channels:status' ? {success:true,show:true,opened:{}} : {success:true});
+    Object.assign(f.context, { testChannelInvoke: invoke });
+    runInContext('electron_1.ipcRenderer.invoke = testChannelInvoke', f.context);
+    await runInContext('showChannelWelcome()', f.context);
+    expect(f.document.querySelector('#agy-channel-welcome [role="dialog"]')).not.toBeNull();
+    (f.document.querySelector('#agy-channel-welcome [data-channel="angrplus"]') as HTMLButtonElement).click();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledWith('plus-channels:open', 'angrplus');
+    (f.document.querySelector('#agy-channel-welcome .agy-welcome-close') as HTMLButtonElement).click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(invoke).toHaveBeenCalledWith('plus-channels:dismiss');
+    expect(f.document.getElementById('agy-channel-welcome')).toBeNull();
+  });
+  it('renders the new settings dropdown, selects an option and closes on Escape', () => {
+    const f = fixture();
+    const source = readFileSync(resolve('src/customPreload.ts'), 'utf8');
+    const start = source.indexOf('  function createNativeSelect<');
+    const end = source.indexOf('  function createNativeButton(', start);
+    expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start);
+    const fn = ts.transpileModule(source.slice(start, end), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+    runInContext(fn + `\nwindow.selectedOption = ''; document.body.append(createNativeSelect([{value:'new',label:'Antigravity New'},{value:'flat',label:'Antigravity FlatNew'}], 'new', v => { window.selectedOption = v; }));`, f.context);
+    const trigger = f.document.querySelector<HTMLButtonElement>('.agy-general-select-trigger')!;
+    trigger.click();
+    expect(f.document.querySelectorAll('[role="option"]')).toHaveLength(2);
+    (f.document.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]).click();
+    expect((f.dom.window as any).selectedOption).toBe('flat');
+    expect(f.document.querySelector('[role="listbox"]')).toBeNull();
+    trigger.click(); f.document.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+    expect(f.document.querySelector('[role="listbox"]')).toBeNull();
+  });
+  it('enables and removes the flat Antigravity appearance without changing the native layout', () => {
+    const f = fixture();
+    runInContext('applyOldAntigravityTheme(true)', f.context);
+    expect(f.document.body.classList.contains('agy-theme-antigravity-old')).toBe(true);
+    expect(f.document.getElementById('agy-antigravity-old-theme')?.textContent).toContain('box-shadow:none');
+    runInContext('applyOldAntigravityTheme(false)', f.context);
+    expect(f.document.body.classList.contains('agy-theme-antigravity-old')).toBe(false);
+    expect(f.document.getElementById('agy-antigravity-old-theme')).toBeNull();
+    runInContext('applyOldAntigravityTheme(true, true)', f.context);
+    expect(f.document.body.classList.contains('agy-theme-antigravity-flatnew')).toBe(true);
+    runInContext('applyOldAntigravityTheme(true, false)', f.context);
+    expect(f.document.body.classList.contains('agy-theme-antigravity-flatnew')).toBe(false);
+    expect(f.document.body.classList.contains('agy-theme-antigravity-old')).toBe(true);
+  });
+
+  it('reserves space between top pane actions and the window buttons', () => {
+    const f = fixture(); f.morph();
+    const controls = f.document.querySelector<HTMLElement>('.agy-chrome-trailing')!;
+    controls.getBoundingClientRect = () => ({ left: 850 }) as DOMRect;
+    const parent = f.document.createElement('div');
+    parent.getBoundingClientRect = () => ({ top: 0, right: 1000, width: 600, height: 36 }) as DOMRect;
+    const toolbar = f.document.createElement('div'); toolbar.dataset.testid = 'pane-titlebar-toolbar';
+    parent.append(toolbar); f.document.body.append(parent);
+    f.morph();
+    expect(toolbar.style.getPropertyValue('--agy-window-gap')).toBe('158px');
+    expect(toolbar.hasAttribute('data-agy-window-gap')).toBe(true);
+    runInContext('applyClaudeTheme(false)', f.context);
+    expect(toolbar.hasAttribute('data-agy-window-gap')).toBe(false);
+    expect(toolbar.style.getPropertyValue('--agy-window-gap')).toBe('');
+  });
+  it('applies and cleans up .plus theme elements, scripts and plugins', () => {
+    const f = fixture();
+    const source = '@plus 1\n@layout native\n@add body | div | theme-badge | Theme\n@script\ndocument.body.dataset.themeActive = "yes";\nreturn () => delete document.body.dataset.themeActive;\n@end\n@css\n.theme-badge { color: red; }';
+    Object.assign(f.context, { testPlusSource: source });
+    runInContext(`const compiledTheme = compilePlusTheme(testPlusSource);
+      plusCustomizations = { css: compiledTheme.css, cssEnabled: true, themeScript: compiledTheme.script,
+        plugins: [{ id: 'fixture', name: 'Fixture', enabled: true, code: 'document.body.dataset.pluginActive = "yes"; return () => delete document.body.dataset.pluginActive;' }] };
+      applyPlusCustomizations();`, f.context);
+    expect(f.document.querySelector('.theme-badge')?.textContent).toBe('Theme');
+    expect(f.document.body.dataset.themeActive).toBe('yes');
+    expect(f.document.body.dataset.pluginActive).toBe('yes');
+    expect(f.document.getElementById('agy-user-custom-css')?.textContent).toContain('@antigravity-layout: native');
+    runInContext('plusCustomizations = { css: "", cssEnabled: false, plugins: [] }; applyPlusCustomizations()', f.context);
+    expect(f.document.querySelector('.theme-badge')).toBeNull();
+    expect(f.document.body.dataset.themeActive).toBeUndefined();
+    expect(f.document.body.dataset.pluginActive).toBeUndefined();
+    expect(f.document.getElementById('agy-user-custom-css')).toBeNull();
+  });
+  it('recognizes the 2.29 home screen with a separately docked composer', () => {
+    const f = fixture();
+    const input = f.document.getElementById('antigravity.agentSidePanelInputBox')!;
+    const home = f.document.createElement('div');
+    home.className = 'agy-home';
+    home.innerHTML = '<div><div class="home-scroll"><div><div data-testid="home-greeting">Native greeting</div></div></div><div class="home-composer"></div></div>';
+    home.querySelector('.home-composer')!.append(input);
+    f.document.body.append(home);
+    f.morph(); f.morph();
+    const screen = home.querySelector('[data-agy-new-chat="v229"]');
+    expect(screen).not.toBeNull();
+    expect(screen!.querySelectorAll('#agy-new-chat-welcome')).toHaveLength(1);
+    expect(screen!.querySelectorAll('#agy-chat-history-overview')).toHaveLength(1);
+    expect(screen!.contains(input)).toBe(false);
+  });
   it('skins settings without replacing native buttons and filters real sections through search', () => {
     const f=fixture();const dialog=f.document.createElement('div');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-label','Settings');
     dialog.innerHTML='<div style="display:flex;flex-direction:row"><aside><div class="bg-sidebar"><button data-testid="settings-nav-item-General">General</button><button data-testid="settings-nav-item-Models">Models</button></div></aside><main>Native controls</main></div>';

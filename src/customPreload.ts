@@ -1,6 +1,46 @@
 /** Custom-model UI, appended to the vendor preload. Sandboxed preloads require Electron only. */
 import { ipcRenderer, webFrame } from 'electron';
 
+function applyOldAntigravityTheme(enabled: boolean, flatNew = false): void {
+  document.body.classList.toggle('agy-theme-antigravity-old', enabled);
+  document.body.classList.toggle('agy-theme-antigravity-flatnew', enabled && flatNew);
+  let style = document.getElementById('agy-antigravity-old-theme');
+  if (!enabled) { style?.remove(); return; }
+  if (!style) { style = document.createElement('style'); style.id = 'agy-antigravity-old-theme'; document.head.append(style); }
+  style.textContent = `
+body.agy-theme-antigravity-old .surface-composer,
+body.agy-theme-antigravity-old .surface-composer-card,
+body.agy-theme-antigravity-old [data-testid="user-message-bubble"],
+body.agy-theme-antigravity-old [data-testid="user-input-step"],
+body.agy-theme-antigravity-old [data-testid="agent-input-box"],
+body.agy-theme-antigravity-old .agy-sidebar-row,
+body.agy-theme-antigravity-old [data-testid="user-input-step"] [class*="group-hover/user-input-step"],
+body.agy-theme-antigravity-old [role="dialog"],
+body.agy-theme-antigravity-old [role="menu"],
+body.agy-theme-antigravity-old button,
+body.agy-theme-antigravity-old input,
+body.agy-theme-antigravity-old textarea { box-shadow:none!important; text-shadow:none!important; }
+body.agy-theme-antigravity-old .surface-composer,
+body.agy-theme-antigravity-old .surface-composer-card,
+body.agy-theme-antigravity-old [data-testid="user-message-bubble"] { background-image:none!important; }
+body.agy-theme-antigravity-old .surface-composer { border:1px solid var(--border, #393a48)!important; border-radius:14px!important; padding:0!important; }
+body.agy-theme-antigravity-old .surface-composer-card { border:0!important; border-radius:13px!important; }
+body.agy-theme-antigravity-old [data-testid="user-message-bubble"] { border-radius:12px!important; }
+body.agy-theme-antigravity-old [class*="surface-"] { box-shadow:none!important; text-shadow:none!important; }
+body.agy-theme-antigravity-old [data-testid="user-input-step"] [class*="shadow"],
+body.agy-theme-antigravity-old [data-testid="agent-input-box"] [class*="shadow"] { box-shadow:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) [data-testid="home-greeting"] .home-greeting-mark { display:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .surface-composer { border-radius:12px!important; }
+/* 2.28 placed the new-chat composer around 30% down the page. */
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home > [data-media-drop-scope] { justify-content:flex-start!important; padding-top:30vh!important; padding-bottom:24px!important; box-sizing:border-box!important; overflow-y:auto!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home [data-media-drop-scope] > .overflow-y-auto { flex:0 0 auto!important; min-height:0!important; padding-top:0!important; padding-bottom:0!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home [data-testid="home-greeting"] { display:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home div:has(> [data-testid="home-greeting"]) { display:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home [data-media-drop-scope] > .shrink-0 { padding-bottom:0!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home #agy-native-history-host { order:2!important; }
+`;
+}
+
 function createCssEditor(value: string): { root: HTMLElement; input: HTMLTextAreaElement } {
   const root = document.createElement('div'); root.className = 'agy-css-editor';
   const toolbar = document.createElement('div'); toolbar.className = 'agy-css-editor-toolbar'; toolbar.textContent = 'CSS / .plus';
@@ -58,6 +98,37 @@ function applyPlusCustomizations(): void {
 }
 async function loadPlusCustomizations(): Promise<void> {
   try { const data = await ipcRenderer.invoke('plus-customizations:read'); if (data && typeof data.css === 'string' && Array.isArray(data.plugins)) { plusCustomizations = data; applyPlusCustomizations(); } } catch (error) { console.error('[Antigravity+ customizations]', error); }
+}
+function injectPlusMenuVersion(version: string): void {
+  if (!version || document.getElementById('agy-plus-menu-version')) return;
+  const item = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="title-menu-bar-option"]')).find(element => /^Version\s+\d/.test(element.textContent?.trim() || ''));
+  const wrapper = item?.parentElement;
+  if (!item || !wrapper?.parentElement) return;
+  const row = document.createElement('div'); row.id = 'agy-plus-menu-version';
+  const text = document.createElement('div'); text.className = item.className; text.textContent = `Antigravity+ ${version}`; text.setAttribute('aria-disabled', 'true'); row.append(text);
+  wrapper.after(row);
+}
+
+async function showChannelWelcome(): Promise<void> {
+  if (!['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname) || document.getElementById('agy-channel-welcome')) return;
+  const state = await ipcRenderer.invoke('plus-channels:status');
+  if (!state?.success || !state.show || document.getElementById('agy-channel-welcome')) return;
+  const overlay = document.createElement('div'); overlay.id = 'agy-channel-welcome';
+  overlay.innerHTML = `<style>
+#agy-channel-welcome{position:fixed;inset:0;z-index:2147483000;background:#0009;display:flex;align-items:center;justify-content:center;padding:20px}
+#agy-channel-welcome .agy-welcome-card{width:min(440px,100%);box-sizing:border-box;background:var(--card,#222);color:var(--foreground,#eee);border:1px solid var(--border,#454545);border-radius:14px;padding:24px;box-shadow:0 18px 60px #0006;font-family:inherit}
+#agy-channel-welcome h2{font-size:18px;line-height:1.35;margin:0 0 10px}#agy-channel-welcome p{font-size:13px;line-height:1.5;color:var(--muted-foreground,#aaa);margin:0 0 18px}
+#agy-channel-welcome .agy-welcome-links{display:grid;gap:8px}#agy-channel-welcome button{font:inherit;cursor:pointer}#agy-channel-welcome .agy-welcome-link{display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 12px;border-radius:8px;border:1px solid var(--border,#444);background:var(--secondary,#333);color:inherit;font-size:13px}
+#agy-channel-welcome .agy-welcome-close{display:block;margin:18px 0 0 auto;padding:8px 15px;border:0;border-radius:8px;background:var(--primary,#c4c9e8);color:var(--primary-foreground,#20222e);font-size:13px}#agy-channel-welcome button:focus-visible{outline:2px solid var(--ring,#9da9db);outline-offset:2px}
+</style><section class="agy-welcome-card" role="dialog" aria-modal="true" aria-labelledby="agy-channel-title"><h2 id="agy-channel-title">Antigravity+</h2><p>Подписывайтесь на наши каналы: там мы публикуем обновления и новости проекта.</p><div class="agy-welcome-links"><button type="button" class="agy-welcome-link" data-channel="angrplus"><span>@AnGrPlus</span><span></span></button><button type="button" class="agy-welcome-link" data-channel="unixmk"><span>@unixmk</span><span></span></button></div><p class="agy-welcome-error" role="status" hidden></p><button type="button" class="agy-welcome-close">Продолжить</button></section>`;
+  const error = overlay.querySelector<HTMLElement>('.agy-welcome-error')!;
+  overlay.querySelectorAll<HTMLButtonElement>('[data-channel]').forEach(button => {
+    const key = button.dataset.channel!; const mark = button.lastElementChild!; mark.textContent = state.opened?.[key] ? '✓' : '↗';
+    button.addEventListener('click', async () => { button.disabled = true; try { const result = await ipcRenderer.invoke('plus-channels:open', key); if (!result?.success) throw new Error(result?.error || 'Не удалось открыть ссылку'); mark.textContent = '✓'; error.hidden = true; } catch (e) { error.textContent = (e as Error).message; error.hidden = false; } finally { button.disabled = false; } });
+  });
+  const close = overlay.querySelector<HTMLButtonElement>('.agy-welcome-close')!;
+  close.addEventListener('click', async () => { close.disabled = true; try { const result = await ipcRenderer.invoke('plus-channels:dismiss'); if (!result?.success) throw new Error(result?.error || 'Не удалось сохранить состояние'); overlay.remove(); } catch (e) { error.textContent = (e as Error).message; error.hidden = false; close.disabled = false; } });
+  document.body.append(overlay); close.focus();
 }
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { void loadPlusCustomizations(); }, { once: true });
@@ -1213,6 +1284,7 @@ body.agy-theme-claude [data-agy-chat-titlebar] [data-testid="breadcrumb-segment"
 
 body.agy-theme-claude #agy-claude-chrome-bar { background:transparent!important; pointer-events:none; }
 body.agy-theme-claude #agy-claude-chrome-bar > button, body.agy-theme-claude .agy-chrome-trailing { pointer-events:auto; }
+body.agy-theme-claude [data-agy-window-gap] { margin-right:var(--agy-window-gap, 0px)!important; }
 body.agy-theme-claude [data-agy-chat-titlebar-slot] { height:0!important; min-height:0!important; }
 body.agy-theme-claude [data-agy-chat-titlebar] [data-testid="breadcrumb-segment"]:first-child::before { content:none; }
 body.agy-theme-claude [role="navigation"][aria-label="Sidebar"] [data-testid="settings-button"] { display:none; }
@@ -1270,6 +1342,9 @@ body.agy-theme-claude .agy-history-empty { min-height:160px; display:flex; align
 
 body.agy-theme-claude [data-agy-new-chat] > :has([data-testid="agent-input-box"]) { margin-top:auto!important; }
 body.agy-theme-claude [data-agy-new-chat] > .px-4:has(> div:only-child:empty) { display:none; }
+body.agy-theme-claude [data-agy-new-chat="v229"] [data-testid="home-greeting"] { display:none!important; }
+body.agy-theme-claude [data-agy-new-chat="v229"] { align-items:stretch!important; }
+body.agy-theme-claude [data-agy-new-chat="v229"] #agy-chat-history-overview { margin-top:0!important; }
 body.agy-theme-claude #agy-chat-history-overview { max-width:36rem!important; align-self:flex-start; margin-left:max(16px,calc((100% - 48rem)/2)); margin-right:auto; }
 body.agy-theme-claude .agy-history-models { min-height:170px; max-height:250px; overflow-y:auto; margin-top:10px; }
 body.agy-theme-claude .agy-history-models > div { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:7px 2px; border-bottom:1px solid #ffffff08; }
@@ -3395,6 +3470,22 @@ function morphToClaudeDesktop(): void {
     document.body.prepend(bar);
   }
 
+  // Some pane toolbars share the top row with the custom window buttons.
+  const windowControls = bar.querySelector<HTMLElement>('.agy-chrome-trailing');
+  const controlsLeft = windowControls?.getBoundingClientRect().left ?? window.innerWidth;
+  document.querySelectorAll<HTMLElement>('[data-testid="pane-titlebar-toolbar"]').forEach(toolbar => {
+    const parent = toolbar.parentElement?.getBoundingClientRect();
+    const gap = parent && parent.height > 0 && parent.top < 36 && controlsLeft > 0
+      ? Math.max(0, Math.min(parent.width / 2, parent.right - controlsLeft + 8)) : 0;
+    if (gap > 0) {
+      const value = `${Math.ceil(gap)}px`;
+      if (toolbar.style.getPropertyValue('--agy-window-gap') !== value) toolbar.style.setProperty('--agy-window-gap', value);
+      if (!toolbar.hasAttribute('data-agy-window-gap')) toolbar.setAttribute('data-agy-window-gap', '');
+    } else if (toolbar.hasAttribute('data-agy-window-gap')) {
+      toolbar.removeAttribute('data-agy-window-gap'); toolbar.style.removeProperty('--agy-window-gap');
+    }
+  });
+
   // 2. Sidebar Header
   const realNav = document.querySelector('div[role="navigation"][aria-label="Sidebar"]');
   if (realNav) {
@@ -3464,6 +3555,13 @@ function morphToClaudeDesktop(): void {
     ) !== null;
     let emptyScreen: HTMLElement | null = inputBox.parentElement;
     while (emptyScreen && !emptyScreen.className.includes('pt-[30vh]')) emptyScreen = emptyScreen.parentElement;
+    // 2.29 separates the scrollable home greeting from the bottom composer.
+    if (!emptyScreen) {
+      const home = inputBox.closest('.agy-home');
+      const greeting = home?.querySelector<HTMLElement>('[data-testid="home-greeting"]');
+      emptyScreen = greeting?.parentElement?.parentElement || null;
+      if (emptyScreen) emptyScreen.dataset.agyNewChat = 'v229';
+    }
     if (emptyScreen) {
       if (!emptyScreen.dataset.agyNewChat) emptyScreen.dataset.agyNewChat = 'true';
       if (!emptyScreen.querySelector('#agy-new-chat-welcome')) {
@@ -3884,6 +3982,9 @@ function applyClaudeTheme(enable: boolean): void {
     morphToClaudeDesktop();
   } else {
     styleEl?.remove();
+    document.querySelectorAll<HTMLElement>('[data-agy-window-gap]').forEach(element => {
+      element.removeAttribute('data-agy-window-gap'); element.style.removeProperty('--agy-window-gap');
+    });
     document.documentElement.classList.remove('agy-theme-claude');
     document.body?.classList.remove('agy-theme-claude', 'agy-mode-home', 'agy-mode-code');
     syncCoworkView();
@@ -4012,7 +4113,7 @@ interface PoolStatusData {
   autoCheckUpdates?: boolean;
   promptEngineMode?: 'antigravity' | 'claude' | 'custom';
   customPromptText?: string;
-  uiThemeMode?: 'antigravity' | 'claude';
+  uiThemeMode?: 'antigravity' | 'antigravity-old' | 'antigravity-flatnew' | 'claude';
   appVersion?: string;
   summary?: {
     checkedAt: number;
@@ -4050,7 +4151,7 @@ const poolAPI = {
     autoCheckUpdates?: boolean;
     promptEngineMode?: 'antigravity' | 'claude' | 'custom';
     customPromptText?: string;
-    uiThemeMode?: 'antigravity' | 'claude';
+    uiThemeMode?: 'antigravity' | 'antigravity-old' | 'antigravity-flatnew' | 'claude';
   }): Promise<{ success: boolean }> => ipcRenderer.invoke('pool:set-options', opts),
   checkAdmin: (): Promise<{ success: boolean; isAdmin: boolean; agentIsAdmin?: boolean | null; supported?: boolean }> => ipcRenderer.invoke('plus:check-admin'),
   relaunchAdmin: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('plus:relaunch-admin'),
@@ -4558,6 +4659,9 @@ window.addEventListener('DOMContentLoaded', () => {
       }
       #agy-tab-general-plus:hover:not(.agy-active-tab):not(.bg-sidebar-secondary) {
         background-color: rgba(255, 255, 255, 0.04) !important;
+      }
+      [role="dialog"][aria-label="Settings"] :has(> #agy-tab-general-plus.agy-active-tab) > [data-testid="settings-nav-item-General"] {
+        background: transparent !important;
       }
       .agy-account-row {
         display: flex;
@@ -6589,11 +6693,11 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function createNativeCard(): HTMLElement {
-    return element('div', 'bg-transparent rounded-xl border border-border overflow-hidden divide-y divide-border');
+    return element('div', 'agy-general-card bg-transparent rounded-xl border border-border overflow-hidden divide-y divide-border');
   }
 
   function createNativeRow(title: string, desc: string, control: HTMLElement): HTMLElement {
-    const row = element('div', 'py-2 px-3 w-full bg-transparent flex justify-between gap-4 items-center');
+    const row = element('div', 'agy-general-row py-2 px-3 w-full bg-transparent flex justify-between gap-4 items-center');
 
     const left = element('div', 'flex-1 flex flex-col gap-0.5');
     const titleWrap = element('div', 'flex items-center gap-1.5');
@@ -6650,7 +6754,28 @@ window.addEventListener('DOMContentLoaded', () => {
     options: Array<{ value: T; label: string }>,
     selectedValue: T,
     onChange: (val: T) => void | Promise<void>,
-  ): HTMLSelectElement {
+  ): HTMLElement {
+    if (!document.body.classList.contains('agy-theme-antigravity-old') || document.body.classList.contains('agy-theme-antigravity-flatnew')) {
+      const wrap = document.createElement('div'); wrap.style.cssText = 'position:relative;min-width:145px';
+      const trigger = document.createElement('button'); trigger.type = 'button';
+      trigger.className = 'agy-general-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+      trigger.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:1px solid var(--border, #454756);border-radius:8px;padding:7px 10px;background:var(--secondary, #303245);color:var(--foreground, #e1e2ee);font:inherit;font-size:12px;cursor:pointer';
+      const label = document.createElement('span'); label.textContent = options.find(x => x.value === selectedValue)?.label || '';
+      const arrow = document.createElement('span'); arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '⌄'; trigger.append(label, arrow); wrap.append(trigger);
+      let menu: HTMLElement | null = null;
+      const close = () => { menu?.remove(); menu = null; trigger.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keydown, true); window.removeEventListener('resize', close); window.removeEventListener('scroll', close, true); };
+      const outside = (event: Event) => { if (!wrap.contains(event.target as Node) && !menu?.contains(event.target as Node)) close(); };
+      const keydown = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); close(); trigger.focus(); return; } if (menu && ['ArrowDown','ArrowUp','Home','End'].includes(event.key)) { event.preventDefault(); const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('button')); const index = items.indexOf(document.activeElement as HTMLButtonElement); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length; items[next]?.focus(); } };
+      trigger.addEventListener('click', () => {
+        if (menu) { close(); return; }
+        menu = document.createElement('div'); menu.className = 'agy-general-select-menu'; menu.setAttribute('role', 'listbox');
+        menu.style.cssText = 'position:fixed;z-index:2147483000;min-width:210px;max-height:280px;overflow:auto;padding:5px;border:1px solid var(--border, #454756);border-radius:10px;background:var(--popover, #2b2d40);color:var(--popover-foreground, #e1e2ee);box-shadow:0 12px 30px #0005';
+        for (const option of options) { const item = document.createElement('button'); item.type = 'button'; item.setAttribute('role', 'option'); item.setAttribute('aria-selected', String(option.value === selectedValue)); item.style.cssText = 'display:flex;justify-content:space-between;gap:14px;width:100%;border:0;border-radius:6px;padding:8px;text-align:left;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer'; item.textContent = option.label; if (option.value === selectedValue) { const check = document.createElement('span'); check.textContent = '✓'; item.append(check); } item.addEventListener('pointerenter', () => { item.style.background = 'var(--accent, #414355)'; }); item.addEventListener('pointerleave', () => { item.style.background = 'transparent'; }); item.addEventListener('click', async () => { label.textContent = option.label; close(); await onChange(option.value); }); menu.append(item); }
+        document.body.append(menu); const rect = trigger.getBoundingClientRect(); const box = menu.getBoundingClientRect(); menu.style.left = `${Math.max(8, Math.min(rect.right - box.width, window.innerWidth - box.width - 8))}px`; menu.style.top = `${rect.bottom + box.height + 8 < window.innerHeight ? rect.bottom + 4 : Math.max(8, rect.top - box.height - 4)}px`;
+        trigger.setAttribute('aria-expanded', 'true'); document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', keydown, true); window.addEventListener('resize', close); window.addEventListener('scroll', close, true);
+      });
+      return wrap;
+    }
     const select = document.createElement('select');
     select.className =
       'bg-secondary text-foreground text-xs rounded-lg border border-border px-2.5 py-1.5 outline-none cursor-pointer';
@@ -6704,6 +6829,17 @@ window.addEventListener('DOMContentLoaded', () => {
 
   async function buildNativeGeneralPlusUI(container: HTMLElement, onUpdate?: () => void): Promise<void> {
     container.replaceChildren();
+
+    const settingsStyle = document.createElement('style');
+    settingsStyle.textContent = `
+body:not(.agy-theme-antigravity-old):not(.agy-theme-claude) #agy-general-plus-panel .agy-general-card,
+body.agy-theme-antigravity-flatnew #agy-general-plus-panel .agy-general-card { background:var(--card, #292b3b)!important;border:1px solid var(--border, #414355)!important;border-radius:12px!important; }
+body:not(.agy-theme-antigravity-old):not(.agy-theme-claude) #agy-general-plus-panel .agy-general-row,
+body.agy-theme-antigravity-flatnew #agy-general-plus-panel .agy-general-row { padding:12px 14px!important; }
+body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!important; }
+.agy-general-select-trigger:focus-visible,.agy-general-select-menu button:focus-visible { outline:2px solid var(--ring, #aab7dd)!important;outline-offset:2px; }
+`;
+    container.append(settingsStyle);
 
     const inner = element('div', 'p-6 flex flex-col gap-6 w-full box-border');
     container.append(inner);
@@ -6916,15 +7052,17 @@ window.addEventListener('DOMContentLoaded', () => {
             'Full visual reskin of sidebar, chat bubbles, thinking accordions, and prompt input.',
             createNativeSelect(
               [
-                { value: 'antigravity', label: 'Antigravity (Default)' },
+                { value: 'antigravity', label: 'Antigravity New' },
+                { value: 'antigravity-flatnew', label: 'Antigravity FlatNew' },
                 { value: 'claude', label: 'Claude Desktop' },
               ],
               uiThemeMode,
               async (val) => {
                 await poolAPI.setOptions({ uiThemeMode: val as any });
                 applyClaudeTheme(val === 'claude');
+                applyOldAntigravityTheme(val === 'antigravity-old' || val === 'antigravity-flatnew', val === 'antigravity-flatnew');
                 await refresh();
-                showToast(`Interface theme set to: ${val === 'claude' ? 'Claude Desktop' : 'Antigravity'}`);
+                showToast(`Interface theme set to: ${val === 'claude' ? 'Claude Desktop' : val === 'antigravity-old' ? 'Antigravity Old' : val === 'antigravity-flatnew' ? 'Antigravity FlatNew' : 'Antigravity New'}`);
               },
             ),
           ),
@@ -7424,29 +7562,6 @@ window.addEventListener('DOMContentLoaded', () => {
           ),
         );
 
-        const urlInput = element(
-          'input',
-          'text-xs bg-secondary text-foreground px-2 py-1 rounded border border-border w-64',
-        ) as HTMLInputElement;
-        urlInput.value = data.updateServerUrl || 'https://antigravity-plus-updates.unalty-api.workers.dev';
-        urlInput.placeholder = 'https://...workers.dev';
-        urlInput.addEventListener('change', async () => {
-          const val = urlInput.value.trim();
-          if (val) {
-            await poolAPI.setOptions({ updateServerUrl: val });
-            showToast('Update server endpoint saved.');
-          }
-        });
-
-
-        updateCard.append(
-          createNativeRow(
-            'Update Server Endpoint',
-            'Worker URL providing release manifest and executable updates.',
-            urlInput,
-          ),
-        );
-
         updateCard.append(updateBox);
         sec5.append(updateCard);
         contentArea.append(sec5);
@@ -7510,7 +7625,7 @@ window.addEventListener('DOMContentLoaded', () => {
         } };
         renderPlugins(); customizationCard.append(pluginList);
         const actions = element('div', 'p-3 flex flex-wrap items-center gap-2'); const status = element('span', 'text-xs text-muted-foreground');
-        actions.append(createNativeButton('Add plugin', () => { const name = prompt('Plugin name'); if (!name?.trim()) return; const id = 'plugin-' + Date.now().toString(36); plusCustomizations.plugins.push({ id, name: name.trim().slice(0, 100), code: '// JavaScript: document, window, api\n', enabled: false }); renderPlugins(); }), createNativeButton('Save and apply', async () => { let parsed: {css:string;script:string}; try { parsed = compilePlusTheme(cssEditor.value); } catch (error) { status.textContent = (error as Error).message; return; } plusCustomizations.css = parsed.css; plusCustomizations.themeSource = cssEditor.value.startsWith('@plus 1\n') ? cssEditor.value : ''; plusCustomizations.cssEnabled = themeEnabled; plusCustomizations.themeScript = plusCustomizations.themeSource ? parsed.script : themeScriptEditor.value; const result = await ipcRenderer.invoke('plus-customizations:save', plusCustomizations); if (!result?.success) { status.textContent = result?.error || 'Could not save'; return; } if (themeEnabled) { const layoutMatch = /^\s*\/\*\s*@antigravity-layout:\s*(claude|native)\s*\*\//i.exec(plusCustomizations.css); if (layoutMatch) { const claude = layoutMatch[1].toLowerCase() === 'claude'; const changed = await poolAPI.setOptions({ uiThemeMode: claude ? 'claude' : 'antigravity' }); if (!changed?.success) { status.textContent = 'Could not change layout'; return; } applyClaudeTheme(claude); } } applyPlusCustomizations(); status.textContent = 'Saved'; }, true), status);
+        actions.append(createNativeButton('Add plugin', () => { const name = prompt('Plugin name'); if (!name?.trim()) return; const id = 'plugin-' + Date.now().toString(36); plusCustomizations.plugins.push({ id, name: name.trim().slice(0, 100), code: '// JavaScript: document, window, api\n', enabled: false }); renderPlugins(); }), createNativeButton('Save and apply', async () => { let parsed: {css:string;script:string}; try { parsed = compilePlusTheme(cssEditor.value); } catch (error) { status.textContent = (error as Error).message; return; } plusCustomizations.css = parsed.css; plusCustomizations.themeSource = cssEditor.value.startsWith('@plus 1\n') ? cssEditor.value : ''; plusCustomizations.cssEnabled = themeEnabled; plusCustomizations.themeScript = plusCustomizations.themeSource ? parsed.script : themeScriptEditor.value; const result = await ipcRenderer.invoke('plus-customizations:save', plusCustomizations); if (!result?.success) { status.textContent = result?.error || 'Could not save'; return; } if (themeEnabled) { const layoutMatch = /^\s*\/\*\s*@antigravity-layout:\s*(claude|native)\s*\*\//i.exec(plusCustomizations.css); if (layoutMatch) { const claude = layoutMatch[1].toLowerCase() === 'claude'; const changed = await poolAPI.setOptions({ uiThemeMode: claude ? 'claude' : 'antigravity' }); if (!changed?.success) { status.textContent = 'Could not change layout'; return; } applyClaudeTheme(claude); applyOldAntigravityTheme(false); } } applyPlusCustomizations(); status.textContent = 'Saved'; }, true), status);
         customizationCard.append(actions); customizationSection.append(customizationCard); contentArea.append(customizationSection);
         const sec6 = element('div', 'space-y-2');
         sec6.append(createNativeSectionHeader('About Antigravity+'));
@@ -7703,7 +7818,7 @@ window.addEventListener('DOMContentLoaded', () => {
     panel.style.width = '100%';
     panel.style.height = '100%';
     panel.style.overflowY = 'auto';
-    panel.style.backgroundColor = '#121316';
+    panel.style.backgroundColor = 'var(--background, #121316)';
     panel.style.color = 'var(--foreground, #f3f4f6)';
     panel.style.position = 'relative';
     panel.style.zIndex = '30';
@@ -7973,9 +8088,30 @@ window.addEventListener('DOMContentLoaded', () => {
 
   function setupInjectionObserver(): void {
     if (typeof document === 'undefined' || !document || !document.body) return;
+    void showChannelWelcome().catch(error => console.error('[Antigravity+ channels]', error));
+    let plusMenuVersion = '';
+    const syncPlusMenuVersion = () => injectPlusMenuVersion(plusMenuVersion);
+    void ipcRenderer.invoke('plus:get-version').then(result => { if (result?.version) { plusMenuVersion = String(result.version); syncPlusMenuVersion(); } }).catch(() => {});
+    const checkPlusUpdate = async () => {
+      if (document.getElementById('agy-update-notice')) return;
+      const result = await poolAPI.checkUpdate();
+      if (!result.success || !result.updateAvailable || !result.downloadUrl) return;
+      const notice = document.createElement('div'); notice.id = 'agy-update-notice';
+      notice.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:100000;display:flex;align-items:center;gap:12px;max-width:420px;padding:12px 14px;border:1px solid var(--border,#444);border-radius:10px;background:var(--card,#242424);color:var(--foreground,#eee);box-shadow:0 8px 24px #0005;font:13px system-ui';
+      const label = document.createElement('span'); label.textContent = `Antigravity+ ${result.latestVersion || ''} доступен`;
+      const install = document.createElement('button'); install.type = 'button'; install.textContent = 'Обновить'; install.style.cssText = 'cursor:pointer;border:0;border-radius:6px;padding:7px 10px;background:var(--primary,#c6c9e8);color:var(--primary-foreground,#222)';
+      const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.textContent = '×'; dismiss.setAttribute('aria-label','Закрыть'); dismiss.style.cssText = 'cursor:pointer;border:0;background:transparent;color:inherit;font-size:18px';
+      dismiss.onclick = () => notice.remove();
+      install.onclick = async () => { install.disabled = true; label.textContent = 'Загрузка обновления…'; try { const applied = await poolAPI.downloadAndApplyUpdate(result.downloadUrl); if (!applied.success) throw new Error(applied.error || 'Не удалось установить обновление'); } catch (error) { label.textContent = (error as Error).message; install.disabled = false; } };
+      notice.append(label, install, dismiss); document.body.append(notice);
+    };
+    const firstUpdateCheck = setTimeout(() => { void checkPlusUpdate().catch(error => console.error('[Antigravity+ update]', error)); }, 15000);
+    const updateTimer = setInterval(() => { void checkPlusUpdate().catch(error => console.error('[Antigravity+ update]', error)); }, 6 * 60 * 60 * 1000);
+    window.addEventListener('pagehide', () => { clearTimeout(firstUpdateCheck); clearInterval(updateTimer); }, { once:true });
     poolAPI
       .getStatus()
       .then((status) => {
+        applyOldAntigravityTheme(status?.uiThemeMode === 'antigravity-old' || status?.uiThemeMode === 'antigravity-flatnew', status?.uiThemeMode === 'antigravity-flatnew');
         if (status && status.uiThemeMode === 'claude') {
           applyClaudeTheme(true);
         } else {
@@ -7983,6 +8119,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       })
       .catch(() => {
+        applyOldAntigravityTheme(false);
         applyClaudeTheme(false);
       });
     applyAntigravityPlusBranding();
@@ -8009,6 +8146,7 @@ window.addEventListener('DOMContentLoaded', () => {
         pending = undefined;
         if (typeof document === 'undefined' || !document || !document.body) return;
         syncGeoErrorHint();
+        syncPlusMenuVersion();
         syncInsightsUi(); syncEnvironmentControl();
         applyAntigravityPlusBranding();
         injectPoolStatusPill();

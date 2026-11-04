@@ -267,6 +267,7 @@ describe('standalone custom model addon', () => {
   it('registers only addon storage channels and exposes no replacement renderer APIs', () => {
     const fixture = createFixture(true);
     expect([...fixture.handlers.keys()]).toEqual([
+      'plus-channels:status', 'plus-channels:open', 'plus-channels:dismiss',
       'plus-customizations:themes', 'plus-customizations:theme-read', 'plus-customizations:themes-open', 'plus-customizations:read', 'plus-customizations:save',
       'gemini-web:stage-file', 'gemini-web:release-file', 'gemini-web:pick-files', 'gemini-web:tools', 'gemini-web:stop', 'gemini-web:dialog-action', 'gemini-web:select-tool', 'gemini-web:edit', 'gemini-web:media',
       'gemini-web:configure', 'gemini-web:open', 'gemini-web:status',

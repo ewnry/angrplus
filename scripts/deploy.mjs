@@ -18,6 +18,7 @@ const ORIGINAL_URL = Buffer.from('https://daily-cloudcode-pa.googleapis.com');
 const PATCHED_URL = Buffer.from('http://localhost:50999/v1internal/xxxxxxx');
 export const REQUIRED_BUILD_FILES = [
   'desktop.js',
+  'loadingOverlay.js',
   'customPreload.js',
   'customIpc.js',
   'telemetry.js',

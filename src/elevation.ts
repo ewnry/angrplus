@@ -79,9 +79,13 @@ export async function requestElevatedRestart(host: ElevationHost): Promise<{succ
   fs.writeFileSync(helper,ELEVATED_RESTART_HELPER);fs.writeFileSync(launcher,ELEVATION_LAUNCHER);
   fs.writeFileSync(requestFile,JSON.stringify({exe:host.exe,cwd:host.cwd,parentPid:host.parentPid,statusFile,argumentLine:args.map(quoteWindowsArgument).join(' '),helperArguments:['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper,'-RequestFile',requestFile].map(quoteWindowsArgument).join(' ')}));
   let launchError: Error | undefined;
+  let launcherExit: number | null | undefined;
   try {
-    const child=(host.spawn||spawn)('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',launcher,'-RequestFile',requestFile],{detached:true,stdio:'ignore',windowsHide:true});
-    child.once('error',error=>{launchError=error});child.unref();
+    // Keep the UAC launcher attached to the interactive session until the
+    // elevated helper has signalled readiness; detached launch can lose it.
+    const child=(host.spawn||spawn)('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',launcher,'-RequestFile',requestFile],{stdio:'ignore',windowsHide:true});
+    child.once('error',error=>{launchError=error});
+    child.once('exit',code=>{launcherExit=code;});child.unref();
   } catch(error){return{success:false,error:(error as Error).message}}
   const now=host.now||Date.now,wait=host.wait||((ms)=>new Promise(resolve=>setTimeout(resolve,ms))),deadline=now()+(host.timeoutMs||120000);
   while(now()<deadline){
@@ -93,6 +97,7 @@ export async function requestElevatedRestart(host: ElevationHost): Promise<{succ
       return{success:true};
     }
     if(status?.state==='failed'||status?.state==='cancelled')return{success:false,cancelled:status.state==='cancelled',error:status.message||'Elevation was cancelled.'};
+    if(launcherExit !== undefined)return{success:false,error:`The Windows elevation launcher exited before the helper was ready (code ${launcherExit ?? 'unknown'}).`};
     await wait(200);
   }
   return{success:false,error:'UAC approval timed out. Antigravity was kept open.'};
