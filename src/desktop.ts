@@ -1,4 +1,5 @@
 import { installThemeIcons } from './themeIcons';
+import { installPlugins } from './pluginRuntime';
 import { app, dialog, session, Menu, MenuItem, BrowserWindow } from 'electron';
 import { registerCustomModelHandlers } from './customIpc';
 import { getProxyPort, stopProxy } from './proxy';
@@ -55,8 +56,9 @@ export function install(getLanguageServerPort: () => number): void {
   if (installed) return;
   installed = true;
   enableVendorDevTools();
+  try { installPlugins(getLanguageServerPort); } catch (error) { console.error('[Antigravity+ plugins]', error); }
   try {
-    const vendorLoading = (module.require || require)(['..', 'loadingOverlay'].join('/'));
+    const vendorLoading = module.require(['..', 'loadingOverlay'].join('/'));
     vendorLoading.attachLoadingOverlay = require('./loadingOverlay').attachLoadingOverlay;
   } catch (error) {
     console.error('[Antigravity+] Could not install loading animation:', error);
@@ -372,6 +374,8 @@ export function install(getLanguageServerPort: () => number): void {
     }
 
     if (win.webContents && typeof win.webContents.on === 'function') {
+      let loadRetries = 0;
+      win.webContents.on('did-finish-load', () => { loadRetries = 0; });
       win.webContents.on('did-fail-load', (_event: any, code: number, description: string, url: string, isMainFrame: boolean) => {
         if (
           !isMainFrame ||
@@ -380,6 +384,17 @@ export function install(getLanguageServerPort: () => number): void {
           (typeof url === 'string' && (url.includes(':0/') || url.endsWith(':0'))) ||
           (typeof win.isDestroyed === 'function' && win.isDestroyed())
         ) {
+          return;
+        }
+        if (code === -7 && typeof url === 'string' && /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url) && loadRetries < 3) {
+          loadRetries++;
+          console.warn(`[Model Patch] Local page timed out, retrying (${loadRetries}/3)`);
+          setTimeout(() => {
+            if (typeof win.isDestroyed === 'function' && win.isDestroyed()) return;
+            const port = getLanguageServerPort();
+            const retryUrl = port > 0 ? url.replace(/^(https?:\/\/(?:127\.0\.0\.1|localhost):)\d+/i, (_match: string, prefix: string) => prefix + port) : url;
+            void win.loadURL(retryUrl).catch((error: unknown) => console.error('[Model Patch] Local retry failed:', error));
+          }, 1500);
           return;
         }
         console.error('[Model Patch] Desktop page failed to load:', code, description, url);

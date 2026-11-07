@@ -56,6 +56,29 @@ export function registerCustomModelHandlers(): void {
     const scriptFile = path.join(themesDirectory, name.slice(0, -4) + '.js'); let themeScript = ''; if (/\.css$/i.test(name) && fs.existsSync(scriptFile)) { const info = fs.lstatSync(scriptFile); if (!info.isFile() || info.isSymbolicLink() || info.size > 500000) throw new Error('Theme script must be a regular JS file under 500 KB'); themeScript = fs.readFileSync(scriptFile, 'utf8'); } return { success: true, css: fs.readFileSync(file, 'utf8'), themeScript };
   });
   handle('plus-customizations:themes-open', async () => { const fs = require('node:fs'); fs.mkdirSync(themesDirectory, { recursive: true }); const error = await (shell as any).openPath(themesDirectory); if (error) throw new Error(error); return { success: true }; });
+  handle('plus-plugins:list', () => {
+    const catalog = require('./pluginCatalog');
+    return { success: true, plugins: catalog.discoverPlugins().map((item: any) => ({ id: item.manifest.id, name: item.manifest.name, version: item.manifest.version, enabled: item.manifest.enabled, hasPatch: !!item.manifest.patch })) };
+  });
+  handle('plus-plugins:open', async () => {
+    const catalog = require('./pluginCatalog'), fs = require('node:fs');
+    fs.mkdirSync(catalog.pluginDirectory(), { recursive: true });
+    const error = await (shell as any).openPath(catalog.pluginDirectory());
+    if (error) throw new Error(error);
+    return { success: true };
+  });
+  handle('plus-plugins:set-enabled', (id: string, enabled: boolean) => {
+    if (typeof id !== 'string' || typeof enabled !== 'boolean') throw new Error('Invalid plugin state');
+    const catalog = require('./pluginCatalog'), fs = require('node:fs');
+    const item = catalog.discoverPlugins().find((plugin: any) => plugin.manifest.id === id);
+    if (!item) throw new Error('Plugin not found');
+    const file = catalog.pluginFile(item.directory, 'plus-plugin.json');
+    const data = JSON.parse(fs.readFileSync(file, 'utf8')); data.enabled = enabled;
+    const temp = path.join(item.directory, '.plus-plugin-' + require('node:crypto').randomUUID() + '.tmp');
+    try { fs.writeFileSync(temp, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' }); fs.renameSync(temp, file); }
+    finally { try { fs.unlinkSync(temp); } catch {} }
+    return { success: true, restartRequired: true, hasPatch: !!item.manifest.patch };
+  });
   handle('plus-customizations:read', () => readCustomizations());
   handle('plus-customizations:save', (value: any) => {
     if (!value || typeof value.css !== 'string' || value.css.length > 2000000 || (value.themeSource !== undefined && (typeof value.themeSource !== 'string' || value.themeSource.length > 2000000)) || (value.themeScript !== undefined && (typeof value.themeScript !== 'string' || value.themeScript.length > 500000)) || !Array.isArray(value.plugins) || value.plugins.length > 50 || value.plugins.some((p: any) => !p || typeof p.id !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(p.id) || typeof p.name !== 'string' || p.name.length > 100 || typeof p.code !== 'string' || p.code.length > 500000 || typeof p.enabled !== 'boolean')) throw new Error('Invalid customization data');

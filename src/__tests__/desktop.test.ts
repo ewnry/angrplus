@@ -28,6 +28,7 @@ async function fixture(proxyPort = 50999, lsPort = 54321) {
   const exported: { install?: (getPort: () => number) => void; enableVendorDevTools?: (cache: any) => void } = {};
   const dependencies = {
     './themeIcons': { installThemeIcons: vi.fn(), applyThemeIcon: vi.fn() },
+    './pluginRuntime': { installPlugins: vi.fn() },
     electron: {
       app: { whenReady: () => Promise.resolve(), on: (name: string, fn: (...args: unknown[]) => void) => events.set(name, fn) },
       session: { defaultSession: { webRequest: { onBeforeRequest: (fn: any) => (intercept = fn) } } },
@@ -128,6 +129,23 @@ describe('additive desktop integration', () => {
       'Antigravity could not load',
       expect.stringContaining('ERR_CERT_AUTHORITY_INVALID'),
     );
+  });
+
+  it('retries local timeout with the current language server port before reporting failure', async () => {
+    vi.useFakeTimers();
+    const f = await fixture(50999, 54321), events = new Map<string, (...args: any[]) => void>();
+    const loadURL = vi.fn().mockResolvedValue(undefined);
+    f.events.get('browser-window-created')!({}, { isDestroyed: () => false, loadURL, webContents: { on: (name: string, callback: (...args: any[]) => void) => events.set(name, callback) } });
+    try {
+      const fail = events.get('did-fail-load')!;
+      fail({}, -7, 'ERR_TIMED_OUT', 'https://127.0.0.1:1234/', true);
+      expect(f.showErrorBox).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(loadURL).toHaveBeenCalledWith('https://127.0.0.1:54321/');
+      for (let i = 0; i < 2; i++) { fail({}, -7, 'ERR_TIMED_OUT', 'https://127.0.0.1:54321/', true); await vi.advanceTimersByTimeAsync(1500); }
+      fail({}, -7, 'ERR_TIMED_OUT', 'https://127.0.0.1:54321/', true);
+      expect(f.showErrorBox).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
   });
 
   it('rewrites premature port 0 loadURL immediately when LS port is already known', async () => {

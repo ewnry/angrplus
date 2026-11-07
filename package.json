@@ -34,8 +34,7 @@
     "build:installer": "node scripts/build-installer.mjs",
     "test:integration": "node scripts/integration-smoke.mjs",
     "build:powershell": "node scripts/build-powershell-installer.mjs",
-    "build:unix": "node scripts/build-unix-installer.mjs",
-    "prebuild": "node scripts/check-oauth-config.mjs"
+    "build:unix": "node scripts/build-unix-installer.mjs"
   },
   "dependencies": {
     "chrome-devtools-mcp": "^0.23.0",

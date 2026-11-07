@@ -89,6 +89,17 @@ afterEach(() => {
 });
 
 describe('standalone deployment with real ASAR fixtures', () => {
+  it('restores a recorded patch even if its current ASAR layout is incompatible', async () => {
+    const f = await fixture();
+    await deploy({ resources: f.resources, dist: f.dist }, { pluginsRoot: path.join(f.root, 'no-plugins') });
+    const archive = path.join(f.resources, 'app.asar');
+    await installVendor(f.root, f.resources, '2.0.1', 'out/vs/workbench/workbench.desktop.main.js');
+    const saved = state(f.resources); saved.patched = fingerprint(f.resources);
+    put(path.join(f.resources, '.antigravity-model-patch', 'state.json'), JSON.stringify(saved));
+    await deploy({ resources: f.resources, dist: f.dist, restore: true });
+    expect(JSON.parse(readArchive(f.resources, 'package.json')).main).toBe('dist/main.js');
+  });
+
   it('includes every relative runtime dependency in the deployed addon', () => {
     const packaged = new Set(REQUIRED_BUILD_FILES);
     for (const file of REQUIRED_BUILD_FILES) {

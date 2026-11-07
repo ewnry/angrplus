@@ -1,0 +1,9 @@
+{
+  "id": "hello-plus",
+  "name": "Hello Plus",
+  "version": "1.0.0",
+  "enabled": false,
+  "main": "main.cjs",
+  "renderer": "renderer.js",
+  "css": "style.css"
+}

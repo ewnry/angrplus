@@ -268,7 +268,7 @@ describe('standalone custom model addon', () => {
     const fixture = createFixture(true);
     expect([...fixture.handlers.keys()]).toEqual([
       'plus-channels:status', 'plus-channels:open', 'plus-channels:dismiss',
-      'plus-customizations:themes', 'plus-customizations:theme-read', 'plus-customizations:themes-open', 'plus-customizations:read', 'plus-customizations:save',
+      'plus-customizations:themes', 'plus-customizations:theme-read', 'plus-customizations:themes-open', 'plus-plugins:list', 'plus-plugins:open', 'plus-plugins:set-enabled', 'plus-customizations:read', 'plus-customizations:save',
       'gemini-web:stage-file', 'gemini-web:release-file', 'gemini-web:pick-files', 'gemini-web:tools', 'gemini-web:stop', 'gemini-web:dialog-action', 'gemini-web:select-tool', 'gemini-web:edit', 'gemini-web:media',
       'gemini-web:configure', 'gemini-web:open', 'gemini-web:status',
       'gemini-web:snapshot', 'gemini-web:navigate', 'gemini-web:models', 'gemini-web:select-model', 'gemini-web:ask',

@@ -106,15 +106,6 @@ async function build() {
   const patchedAsarPath = path.join(TEMP_BUILD, 'app.asar');
   await asar.createPackage(unpackedDir, patchedAsarPath);
 
-  if (!process.argv.includes('--package-only') && fs.existsSync(activeAsar)) {
-    try {
-      fs.copyFileSync(patchedAsarPath, activeAsar);
-      console.log(`  Updated active ASAR directly at: ${activeAsar}`);
-    } catch (e) {
-      console.log(`  Could not copy to active ASAR (${e.message}), will rely on setup installer.`);
-    }
-  }
-
   const asarBuffer = fs.readFileSync(patchedAsarPath);
   const gzBuffer = zlib.gzipSync(asarBuffer, { level: 9 });
   const gzPath = path.join(INSTALLER_DIR, 'app.asar.gz');

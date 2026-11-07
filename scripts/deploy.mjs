@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
 import * as asar from '@electron/asar';
 import { planRuntimePatch } from './runtime-patch.mjs';
 
@@ -18,6 +19,9 @@ const ORIGINAL_URL = Buffer.from('https://daily-cloudcode-pa.googleapis.com');
 const PATCHED_URL = Buffer.from('http://localhost:50999/v1internal/xxxxxxx');
 export const REQUIRED_BUILD_FILES = [
   'desktop.js',
+  'pluginRuntime.js',
+  'pluginUI.js',
+  'pluginCatalog.js',
   'loadingOverlay.js',
   'customPreload.js',
   'customIpc.js',
@@ -330,9 +334,9 @@ export function preflight(options = {}) {
   if (exists(path.join(resources, 'app', 'out'))) unsupported();
   const files = locations(resources);
   for (const filename of Object.values(files)) assertNoLinks(resources, filename);
-  let info = inspectArchive(files.archive);
   const state = readState(resources);
   const current = fingerprint(resources);
+  let info = options.restore ? null : inspectArchive(files.archive);
   const dist = path.resolve(options.dist || path.join(PROJECT, 'dist'));
   let vendorFiles = files;
   let runtimePatch;
@@ -363,6 +367,7 @@ export function preflight(options = {}) {
       'The current app does not match this installer’s last patched archive, unpacked files, and binary. An app update or external change must not be overwritten.',
     );
   }
+  if (options.restore) info = inspectArchive(locations(verifyBackup(resources, state)).archive);
   return { resources, files, ...info, state, current, dist, plan, vendorFiles, runtimePatch };
 }
 function copyIfPresent(source, destination) {
@@ -492,6 +497,24 @@ function swapTransaction(resources, staging, replacements, rename = fs.renameSyn
     throw error;
   }
 }
+export async function applyPluginPatches(dist, source, root = path.join(os.homedir(), '.gemini', 'antigravity', 'plugins')) {
+  if (!exists(root)) return;
+  const hasArchiveHooks = fs.readdirSync(root, { withFileTypes: true }).some((entry) => {
+    if (!entry.isDirectory()) return false;
+    try { const manifest = JSON.parse(fs.readFileSync(path.join(root, entry.name, 'plus-plugin.json'), 'utf8')); return manifest.enabled === true && typeof manifest.patch === 'string' && !!manifest.patch; } catch { return false; }
+  });
+  if (!hasArchiveHooks) return;
+  const requirePluginRuntime = createRequire(import.meta.url);
+  const catalog = requirePluginRuntime(path.join(dist, 'pluginCatalog.js'));
+  for (const { directory, manifest } of catalog.discoverPlugins(root).filter((p) => p.manifest.enabled && p.manifest.patch)) {
+    const entry = requirePluginRuntime(catalog.pluginFile(directory, manifest.patch));
+    const patch = typeof entry === 'function' ? entry : entry.patch;
+    if (typeof patch !== 'function') fail('PLUGIN_INVALID', `${manifest.id}: patch must export patch(api)`);
+    console.log(`[Plugin] Applying ${manifest.id} to staged app.asar`);
+    await patch(Object.freeze({ root: source, fs, path, log: (...args) => console.log(`[Plugin ${manifest.id}]`, ...args) }));
+  }
+}
+
 export async function deploy(options = {}, operations = {}) {
   const info = preflight(options);
   if (options.check)
@@ -573,6 +596,7 @@ export async function deploy(options = {}, operations = {}) {
       const marker = path.join(source, 'antigravity-proxy.json');
       if (info.plan.mode === 'fixed') fs.writeFileSync(marker, JSON.stringify({ requiredPort: 50999 }) + '\n');
       if (info.plan.mode === 'dynamic' && exists(marker)) removeOwned(source, marker);
+      await applyPluginPatches(info.dist, source, operations.pluginsRoot);
       // Rebuild referenced unpacked entries cleanly; then preserve unlisted vendor
       // extras without overwriting newly generated files or following live links.
       await (operations.pack || packCandidate)(source, candidate.archive, info.entries);

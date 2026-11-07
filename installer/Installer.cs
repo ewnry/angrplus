@@ -8,6 +8,8 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using System.Collections.Generic;
+using System.Net;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 
 namespace AntigravityPlus.Installer
@@ -191,6 +193,11 @@ namespace AntigravityPlus.Installer
                 {
                     OpenUrl("https://t.me/unixmk");
                 }
+                else if (input == "5")
+                {
+                    DownloadAndInstallAntigravity();
+                    Pause();
+                }
             }
         }
 
@@ -353,6 +360,11 @@ namespace AntigravityPlus.Installer
             Console.ForegroundColor = ConsoleColor.Gray;
             Console.WriteLine("Telegram (@unixmk)");
 
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.Write("  5  ");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine("Download / repair Antigravity (keeps user data)");
+
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write("  0  ");
             Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -483,7 +495,7 @@ namespace AntigravityPlus.Installer
 
         private static void PerformRestore(bool silent)
         {
-            if (!File.Exists(backupPath) && !Directory.Exists(Path.Combine(resourcesPath, ".antigravity-model-patch")))
+            if (String.IsNullOrEmpty(resourcesPath) || (!File.Exists(backupPath) && !Directory.Exists(Path.Combine(resourcesPath, ".antigravity-model-patch"))))
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("\n  Error: Vanilla backup file (app.asar.vanilla_backup) not found.");
@@ -546,6 +558,46 @@ namespace AntigravityPlus.Installer
                 Console.WriteLine("\n  Restore failed: " + ex.Message);
                 Console.ResetColor();
             }
+        }
+
+        private static void DownloadAndInstallAntigravity()
+        {
+            string tempInstaller = Path.Combine(Path.GetTempPath(), "Antigravity-official-" + Guid.NewGuid().ToString("N") + ".exe");
+            try
+            {
+                Console.WriteLine("\n  Downloads the current official Windows installer from Google.");
+                Console.WriteLine("  Your account and application data are not deleted by Antigravity+.");
+                Console.Write("  Continue? [y/N]: ");
+                string answer = Console.ReadLine();
+                if (answer == null || !answer.Trim().Equals("y", StringComparison.OrdinalIgnoreCase)) return;
+                if (!EnsureClosed()) return;
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                using (var client = new WebClient())
+                {
+                    client.Headers.Add("User-Agent", "AntigravityPlus-Installer");
+                    Console.WriteLine("  Checking the official download page...");
+                    string html = client.DownloadString("https://antigravity.google/download?os=windows");
+                    Match link = Regex.Match(html, @"https://storage\.googleapis\.com/antigravity-public/antigravity-hub/[A-Za-z0-9._-]+/windows-x64/Antigravity-x64\.exe", RegexOptions.IgnoreCase);
+                    if (!link.Success) throw new InvalidOperationException("The official Windows installer link was not found. The download page may have changed.");
+                    Console.WriteLine("  Downloading the Google installer...");
+                    client.DownloadFile(link.Value, tempInstaller);
+                }
+                var verify = new ProcessStartInfo("powershell.exe");
+                verify.UseShellExecute = false; verify.CreateNoWindow = true;
+                string verifyScript = "$s=Get-AuthenticodeSignature -LiteralPath '" + tempInstaller.Replace("'", "''") + "'; if ($s.Status -eq 'Valid' -and $s.SignerCertificate.Subject -match 'O=Google LLC') { exit 0 } else { exit 1 }";
+                verify.Arguments = "-NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(verifyScript));
+                using (var verifier = Process.Start(verify)) { verifier.WaitForExit(); if (verifier.ExitCode != 0) throw new InvalidOperationException("Google installer signature could not be verified. It was not launched."); }
+                Console.WriteLine("  Launching Google installer. Finish its installation window.");
+                using (var installer = Process.Start(new ProcessStartInfo(tempInstaller) { UseShellExecute = true }))
+                { if (installer == null) throw new InvalidOperationException("Could not start the Google installer."); installer.WaitForExit(); if (installer.ExitCode != 0) throw new InvalidOperationException("Google installer exited with code " + installer.ExitCode + "."); }
+                LocateAntigravity();
+                if (String.IsNullOrEmpty(asarPath) || !File.Exists(asarPath)) throw new InvalidOperationException("Antigravity was not found after the installer finished.");
+                Console.WriteLine("  Checking compatibility and applying Antigravity+...");
+                PerformInstall(silent: true, relaunch: false);
+                if (Environment.ExitCode != 0) Console.WriteLine("  Antigravity is installed, but the patch was not applied. See the error above.");
+            }
+            catch (Exception ex) { Environment.ExitCode = 1; Console.WriteLine("  Download / repair failed: " + ex.Message); }
+            finally { try { if (File.Exists(tempInstaller)) File.Delete(tempInstaller); } catch { } }
         }
 
         private static void RestartAntigravity()

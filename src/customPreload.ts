@@ -570,12 +570,7 @@ body.agy-theme-claude button[data-testid="model-selector-trigger"],
 body.agy-theme-claude button[data-testid="project-selector-trigger"],
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] div.flex.w-full.items-center.justify-between,
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] button[data-tooltip-id="input-send-button-cancel-tooltip"],
-body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] button[data-tooltip-id="input-send-button-send-tooltip"],
-body.agy-theme-claude div.absolute.right-0.top-0.z-50.flex.items-center.shrink-0,
-body.agy-theme-claude button[data-testid="toggle-overview-panel"],
-body.agy-theme-claude button[data-testid="toggle-aux-sidebar"],
-body.agy-theme-claude button[data-testid="aux-pane-new-tab-button"],
-body.agy-theme-claude button[data-testid="toggle-maximize-pane"] {
+body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] button[data-tooltip-id="input-send-button-send-tooltip"] {
   display: none !important;
 }
 body.agy-theme-claude div:has(> [data-testid="title-menu-bar"]),
@@ -602,10 +597,20 @@ body.agy-theme-claude button[data-testid="project-selector-trigger"][data-agy-pr
 }
 
 /* Top Padding for Claude Chrome Bar */
-body.agy-theme-claude div.h-screen.w-screen.flex.flex-col {
-  padding-top: 36px !important;
+body.agy-theme-claude #root {
+  position: relative !important;
+  margin-top: 36px !important;
+  width: 100% !important;
+  height: calc(100vh - 36px) !important;
+  overflow: visible !important;
+}
+body.agy-theme-claude #root div.h-screen.w-screen.flex.flex-col {
+  height: calc(100vh - 36px) !important;
+  padding-top: 0 !important;
   box-sizing: border-box !important;
 }
+body.agy-theme-claude #root > * { max-height:100%!important; }
+body.agy-theme-claude #root .h-screen { height:100%!important; max-height:100%!important; }
 
 /* ─── Claude Desktop Top Chrome Bar ──────────────────────────────────── */
 #agy-claude-chrome-bar {
@@ -690,10 +695,12 @@ body.agy-theme-claude div[role="navigation"][aria-label="Sidebar"] {
   border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
   display: flex !important;
   flex-direction: column !important;
+  padding-top: 0 !important;
 }
 
 #agy-claude-sidebar-header {
   padding: 8px 10px 4px 10px;
+  margin-top: -32px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -781,6 +788,10 @@ body.agy-theme-claude div[role="navigation"][aria-label="Sidebar"] {
 /* User Card at Sidebar Bottom */
 #agy-claude-user-card {
   margin-top: auto;
+  position:fixed;
+  left:0;
+  bottom:0;
+  z-index:100;
   padding: 10px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
@@ -791,7 +802,7 @@ body.agy-theme-claude div[role="navigation"][aria-label="Sidebar"] {
   border-right: none;
   border-bottom: none;
   cursor: pointer;
-  width: 100%;
+  width:var(--agy-sidebar-edge,250px);
   text-align: left;
   font-size: 13px;
   transition: background 0.12s ease;
@@ -1233,13 +1244,18 @@ body.agy-theme-claude #agy-claude-user-menu .agy-menu-item { min-height:27px; pa
 body.agy-theme-claude #agy-claude-user-menu .agy-menu-user-header { padding:0 4px 6px!important; }
 body.agy-theme-claude #agy-claude-user-menu .agy-menu-divider { margin:5px 3px; }
 body.agy-theme-claude [data-testid="conversation-view"] { background:#151515!important; }
-body.agy-theme-claude [data-testid="autoscroll-viewport"] > .mx-auto { max-width:48rem!important; padding:8px 12px 20px; }
+body.agy-theme-claude [data-testid="autoscroll-viewport"] > .mx-auto { max-width:48rem!important; padding:44px 12px 20px; }
 body.agy-theme-claude [role="article"][aria-label="User message"] { position:static!important; margin:18px 0 22px!important; }
 body.agy-theme-claude .md-sticky-message-body { background:transparent!important; }
 body.agy-theme-claude [data-testid="user-input-step"] { align-items:flex-end!important; padding-top:0!important; }
 body.agy-theme-claude [data-testid="user-input-step"] > .w-full { width:fit-content!important; max-width:88%; }
-body.agy-theme-claude [data-testid="user-input-step"] > .w-full > .relative { background:#292928!important; border:0!important; border-radius:16px!important; padding:0!important; }
-body.agy-theme-claude [data-testid="user-input-step"] > .w-full > .relative > .relative { background:transparent!important; border-radius:16px!important; padding:11px 15px!important; }
+body.agy-theme-claude [data-testid="user-input-step"] > .w-full > .relative,
+body.agy-theme-claude [data-testid="user-input-step"] div[class*="bg-"]:has(> [data-quotable]) { background:#292928!important; border:0!important; border-radius:16px!important; padding:0!important; }
+body.agy-theme-claude [data-testid="user-input-step"] > .w-full > .relative > .relative { background:#292928!important; border-radius:16px!important; padding:11px 15px!important; }
+body.agy-theme-claude [data-testid="user-input-step"] :is(.bg-card,.bg-card-border):has([data-quotable]):not(.user-input-buttons-container) { background:#292928!important; }
+body.agy-theme-claude [data-testid="user-input-step"]:has(.agy-message-actions) .user-input-buttons-container { display:none!important; }
+body.agy-theme-claude [role="article"][aria-label="User message"] :is(button[aria-label="Copy"],button[aria-label="Undo to this point"]) { display:none!important; }
+
 body.agy-theme-claude [data-testid="user-input-step"] [data-quotable] { font-size:15px!important; line-height:1.55!important; color:#e1e0d9!important; }
 body.agy-theme-claude [data-testid="user-input-step"] .max-h-\\[10vh\\] { max-height:none!important; }
 body.agy-theme-claude [data-testid="planner-response-text"] { padding:0 4px!important; color:#e1e0d9!important; }
@@ -1276,9 +1292,35 @@ body.agy-theme-claude .agy-effort-rec { text-align:center; font-size:12px; min-h
 
 body.agy-theme-claude #agy-claude-chrome-bar { border:0; background:linear-gradient(to right,#111110 0 var(--agy-sidebar-edge,256px),#151515 var(--agy-sidebar-edge,256px)); }
 body.agy-theme-claude [data-agy-chat-titlebar-slot] { height:0!important; }
+body.agy-theme-claude.agy-cowork-active [data-agy-chat-titlebar] { display:none!important; }
 body.agy-theme-claude [data-agy-chat-titlebar] { position:fixed; left:var(--agy-sidebar-edge,256px); right:138px; top:0; height:36px!important; min-height:36px!important; width:auto!important; z-index:10000; background:#151515; -webkit-app-region:drag; }
 body.agy-theme-claude [data-agy-chat-titlebar] > div:first-child { padding-left:12px!important; }
 body.agy-theme-claude [data-agy-chat-titlebar] [data-testid="pane-titlebar-toolbar"] { padding-right:4px!important; }
+body.agy-theme-claude [data-agy-chat-titlebar] [data-testid="pane-titlebar-toolbar"] {
+  position:fixed!important; top:36px!important; right:calc(var(--aux-pane-width, 0px) + 8px)!important;
+  height:32px!important; z-index:10060!important; opacity:1!important; visibility:visible!important;
+  pointer-events:auto!important; background:#151515!important; -webkit-app-region:no-drag!important;
+}
+/* Keep native auxiliary-pane controls clear of the window buttons and chat title. */
+body.agy-theme-claude div.absolute.right-0.top-0.z-50:has([data-testid="toggle-aux-sidebar"]) {
+  display:flex!important; position:fixed!important; top:36px!important; right:4px!important;
+  height:40px!important; z-index:10050!important; padding:0 6px!important;
+  background:#151515!important; -webkit-app-region:no-drag!important;
+}
+body.agy-theme-claude div.absolute.right-0.top-0.z-50:has([data-testid="toggle-aux-sidebar"]) > div { display:flex!important; opacity:1!important; visibility:visible!important; pointer-events:auto!important; }
+body.agy-theme-claude div.absolute.right-0.top-0.z-50:has([data-testid="toggle-aux-sidebar"]) [aria-hidden="true"].shrink-0 { display:none!important; }
+body.agy-theme-claude :is(button[data-testid="toggle-aux-sidebar"],button[data-testid="toggle-maximize-pane"]) { opacity:0!important; pointer-events:none!important; }
+body.agy-theme-claude button[data-testid="toggle-overview-panel"] {
+  position:fixed!important; top:36px!important; right:76px!important; left:auto!important;
+  opacity:0!important; pointer-events:none!important;
+}
+body.agy-theme-claude #agy-aux-actions { position:fixed; top:36px; right:12px; z-index:11000; display:flex; gap:2px; background:#151515; -webkit-app-region:no-drag; }
+body.agy-theme-claude #agy-aux-actions button { width:30px; height:32px; display:flex; align-items:center; justify-content:center; color:#b4b4ad; background:transparent; border:0; border-radius:5px; cursor:pointer; }
+body.agy-theme-claude #agy-aux-actions button:hover { background:#333332; color:#fff; }
+body.agy-theme-claude [data-aux-pane-open] [data-active-tab-id] {
+  padding-right:80px!important;
+}
+
 body.agy-theme-claude [data-agy-chat-titlebar] [data-testid="breadcrumb-segment"] { font-size:13px; }
 body.agy-theme-claude [data-agy-chat-titlebar] [data-testid="breadcrumb-segment"]:first-child::before { content:'▱'; font-size:19px; margin-right:7px; }
 
@@ -1293,7 +1335,14 @@ body.agy-theme-claude #agy-sidebar-more summary::before { content:none!important
 body.agy-theme-claude #agy-sidebar-more summary svg { width:16px; height:16px; transition:transform .12s; }
 body.agy-theme-claude #agy-sidebar-more[open] summary svg { transform:rotate(90deg); }
 body.agy-theme-claude [data-testid="conversation-row-sidebar"]::before { content:none; }
-body.agy-theme-claude [data-agy-row-actions], body.agy-theme-claude [data-agy-row-action-inner] { position:static!important; }
+body.agy-theme-claude [data-agy-row-actions], body.agy-theme-claude [data-agy-row-action-inner] {
+  position:static!important; background:transparent!important; background-image:none!important; box-shadow:none!important;
+}
+body.agy-theme-claude [data-agy-row-actions]::before, body.agy-theme-claude [data-agy-row-actions]::after,
+body.agy-theme-claude [data-agy-row-action-inner]::before, body.agy-theme-claude [data-agy-row-action-inner]::after {
+  background:transparent!important; background-image:none!important; box-shadow:none!important;
+}
+body.agy-theme-claude [data-agy-row-actions] *, body.agy-theme-claude [data-agy-row-action-inner] * { background-image:none!important; }
 body.agy-theme-claude [data-agy-row-status] { position:absolute!important; left:8px; top:50%; transform:translateY(-50%); opacity:1!important; pointer-events:none; width:16px; justify-content:center; }
 body.agy-theme-claude [data-testid="project-header"] { margin-top:0; height:32px!important; }
 body.agy-theme-claude [role="navigation"][aria-label="Sidebar"] > .overflow-y-auto { overflow-anchor:none; scrollbar-gutter:stable; }
@@ -1316,7 +1365,10 @@ body.agy-theme-claude #agy-btn-attach { border:0!important; background:transpare
 body.agy-theme-claude .agy-pill { font-size:13px!important; font-weight:500!important; }
 
 body.agy-theme-claude [data-sidebar-scroll-container] { overflow-anchor:none; scrollbar-gutter:stable; }
-body.agy-theme-claude [role="navigation"][aria-label="Sidebar"] > .overflow-y-auto { overflow:hidden; }
+body.agy-theme-claude [data-sidebar-scroll-container] { padding-bottom:52px!important; box-sizing:border-box!important; }
+body.agy-theme-claude #agy-claude-user-card { background:#111110!important; }
+body.agy-theme-claude [role="navigation"][aria-label="Sidebar"] { min-height:0!important; height:100%!important; }
+body.agy-theme-claude [role="navigation"][aria-label="Sidebar"] > .overflow-y-auto { overflow-y:auto!important; min-height:0!important; flex:1 1 0!important; }
 
 body.agy-theme-claude [data-agy-new-chat] > :not(#agy-new-chat-welcome) { margin-top:0; }
 body.agy-theme-claude [data-agy-new-chat] > :has([data-testid="agent-input-box"]) { margin-top:auto; flex-shrink:0; }
@@ -1551,7 +1603,7 @@ body.agy-theme-claude #agy-stream-overlay { position:fixed; inset:0; pointer-eve
 body.agy-theme-claude:has(#agy-response-activity) [data-testid="agent-loading"] { display:none!important; }
 body.agy-theme-claude [data-testid="planner-response-text"] span[style*="fade-in"] { animation:none!important; }
 
-body.agy-theme-claude [data-testid="user-input-step"] .user-input-buttons-container { display:none!important; }
+body.agy-theme-claude [role="article"][aria-label="User message"]:has(.agy-message-actions) .user-input-buttons-container { display:none!important; }
 body.agy-theme-claude [data-testid="user-input-step"] .agy-message-actions { display:flex; align-items:center; justify-content:flex-end; gap:4px; color:#92918a; min-height:24px; margin-top:3px; opacity:0; transition:opacity .12s; }
 body.agy-theme-claude [data-testid="user-input-step"]:hover .agy-message-actions, body.agy-theme-claude [data-testid="user-input-step"]:focus-within .agy-message-actions { opacity:1; }
 body.agy-theme-claude .agy-message-actions > span { font-size:11px; margin-right:5px; max-width:380px; }
@@ -2424,7 +2476,8 @@ function openHamburgerMenu(): void {
 
   if (btnMenu) {
     const rect = btnMenu.getBoundingClientRect();
-    pop.style.left = `${rect.left}px`;
+    pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 208))}px`;
+    pop.style.right = 'auto';
     pop.style.top = `${rect.bottom + 6}px`;
   }
 
@@ -3437,6 +3490,32 @@ function syncClaudeHeader(): void {
   const edge = nav?.getBoundingClientRect().right || 0;
   const value = `${Math.max(142, edge)}px`;
   if (document.body.style.getPropertyValue('--agy-sidebar-edge') !== value) document.body.style.setProperty('--agy-sidebar-edge', value);
+  const pane = document.querySelector<HTMLElement>('[data-aux-pane-open="true"]');
+  const auxEdge = `${pane?.getBoundingClientRect().left || window.innerWidth}px`;
+  if (document.body.style.getPropertyValue('--agy-aux-edge') !== auxEdge) document.body.style.setProperty('--agy-aux-edge', auxEdge);
+}
+
+function syncClaudeAuxActions(): void {
+  const controls = [
+    { id: 'toggle-overview-panel', label: 'Toggle overview panel', icon: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"><rect x="2.5" y="2" width="11" height="12" rx="1.5"/><path d="M5 5.5h6M5 8h6M5 10.5h4"/></svg>' },
+    { id: 'toggle-maximize-pane', label: 'Maximize or restore pane', icon: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>' },
+    { id: 'toggle-aux-sidebar', label: 'Toggle side panel', icon: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M10 2v12"/></svg>' },
+  ];
+  let bar = document.getElementById('agy-aux-actions');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'agy-aux-actions'; document.body.append(bar); }
+  for (const control of controls) {
+    const native = document.querySelector<HTMLButtonElement>(`button[data-testid="${control.id}"]`);
+    let proxy = bar.querySelector<HTMLButtonElement>(`[data-agy-aux-action="${control.id}"]`);
+    if (!native) { proxy?.remove(); continue; }
+    if (!proxy) {
+      proxy = document.createElement('button'); proxy.type = 'button';
+      proxy.dataset.agyAuxAction = control.id; proxy.title = control.label; proxy.setAttribute('aria-label', control.label);
+      proxy.innerHTML = control.icon;
+      proxy.addEventListener('click', () => document.querySelector<HTMLButtonElement>(`button[data-testid="${control.id}"]`)?.click());
+      const next = controls.slice(controls.indexOf(control) + 1).map(item => bar!.querySelector(`[data-agy-aux-action="${item.id}"]`)).find(Boolean);
+      bar.insertBefore(proxy, next || null);
+    }
+  }
 }
 
 function morphToClaudeDesktop(): void {
@@ -3724,6 +3803,7 @@ function morphToClaudeDesktop(): void {
     if (titlebar.parentElement && !titlebar.parentElement.dataset.agyChatTitlebarSlot) titlebar.parentElement.dataset.agyChatTitlebarSlot = 'true';
   }
   syncClaudeHeader();
+  syncClaudeAuxActions();
   syncCoworkView();
   syncClaudeIdentity();
   syncClaudeActivity();
@@ -3993,6 +4073,7 @@ function applyClaudeTheme(enable: boolean): void {
     document.querySelectorAll('.agy-message-actions, .agy-message-editor').forEach((element) => element.remove());
     document.querySelectorAll('[data-agy-editing]').forEach((element) => element.removeAttribute('data-agy-editing'));
     document.getElementById('agy-claude-chrome-bar')?.remove();
+    document.getElementById('agy-aux-actions')?.remove();
     document.getElementById('agy-claude-sidebar-header')?.remove();
     document.getElementById('agy-claude-user-card')?.remove();
     document.getElementById('agy-claude-composer-footer')?.remove();
@@ -6940,6 +7021,29 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
           })));
         sec1.append(poolCard);
         contentArea.append(sec1);
+
+        // File-based plugins are managed independently from inline theme scripts.
+        const pluginsSec = element('div', 'space-y-2');
+        pluginsSec.append(createNativeSectionHeader('Plugins'));
+        const pluginsCard = createNativeCard();
+        const openPlugins = createNativeButton('Open folder', async () => {
+          const result = await ipcRenderer.invoke('plus-plugins:open');
+          if (!result?.success) showToast(result?.error || 'Could not open plugins folder');
+        });
+        pluginsCard.append(createNativeRow('Plugin folder', 'Add a plugin folder containing plus-plugin.json. Plugins run with your user permissions.', openPlugins));
+        const pluginsResult = await ipcRenderer.invoke('plus-plugins:list');
+        if (!pluginsResult?.success) pluginsCard.append(createNativeRow('Plugins unavailable', pluginsResult?.error || 'Could not load plugins.', element('span', 'text-xs text-muted-foreground')));
+        else if (!pluginsResult.plugins.length) pluginsCard.append(createNativeRow('No plugins installed', 'Add a plugin to the folder, then reopen General+.', element('span', 'text-xs text-muted-foreground')));
+        else for (const plugin of pluginsResult.plugins) {
+          const detail = `v${plugin.version} · ${plugin.id}${plugin.hasPatch ? ' · modifies app.asar' : ''}`;
+          pluginsCard.append(createNativeRow(plugin.name, detail, createNativeSwitch(plugin.enabled, async (enabled) => {
+            const result = await ipcRenderer.invoke('plus-plugins:set-enabled', plugin.id, enabled);
+            if (!result?.success) { showToast(result?.error || 'Could not update plugin'); await refresh(); return; }
+            showToast(result.hasPatch ? 'Reapply the patch and restart Antigravity to change this plugin.' : 'Restart Antigravity to apply plugin changes.');
+            await refresh();
+          })));
+        }
+        pluginsSec.append(pluginsCard); contentArea.append(pluginsSec);
 
         // --- SECTION 2: Audio Notifications ---
         const sec2 = element('div', 'space-y-2');

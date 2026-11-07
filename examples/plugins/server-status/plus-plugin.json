@@ -1,0 +1,7 @@
+{
+  "id": "server-status",
+  "name": "Language server status",
+  "version": "1.0.0",
+  "enabled": false,
+  "main": "main.cjs"
+}
