@@ -130,6 +130,8 @@ async function build() {
     '/r:System.Web.Extensions.dll',
     `/resource:${gzPath},AppAsarGz`,
     `/resource:${path.join(INSTALLER_DIR, "runtime-patch.zip")},RuntimePatchZip`,
+    `/resource:${path.join(ASSETS, "7zip", "7z.exe")},SevenZipExe`,
+    `/resource:${path.join(ASSETS, "7zip", "7z.dll")},SevenZipDll`,
     `/out:${outExe}`,
   ];
 

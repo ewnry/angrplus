@@ -1,10 +1,18 @@
 import { installThemeIcons } from './themeIcons';
 import { installPlugins } from './pluginRuntime';
-import { app, dialog, session, Menu, MenuItem, BrowserWindow } from 'electron';
+import { app, dialog, session, Menu, MenuItem, BrowserWindow, ipcMain } from 'electron';
 import { registerCustomModelHandlers } from './customIpc';
 import { getProxyPort, stopProxy } from './proxy';
 
 let installed = false;
+
+export function recoveryHtml(profiles: Array<{ id: string; name: string; mode: string }>, activeId: string | null): string {
+  const escape = (value: string) => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+  const rows = profiles.map(profile => `<button class="row" type="button" data-recovery-profile="${escape(profile.id)}"><span><strong>${escape(profile.name)}</strong><small>${escape(profile.mode.toUpperCase())}</small></span><span class="state">${profile.id === activeId ? 'Активен' : 'Выбрать'} <span aria-hidden="true">›</span></span></button>`).join('');
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Antigravity+</title><style>
+  *{box-sizing:border-box}body{margin:0;background:#1f2438;color:#d5def5;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:min(560px,calc(100% - 40px));margin:clamp(26px,7vh,80px) auto}h1{font-size:19px;font-weight:600;margin:0 0 8px}p{color:#9caaca;line-height:1.55;margin:0 0 22px}.section{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px;color:#b8c4e2;font-size:12px;font-weight:600}.list{border:1px solid #3a4057;border-radius:9px;overflow:auto;background:#2b3045;max-height:32vh}.row{font:inherit;width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;color:inherit;background:transparent;text-align:left;padding:11px 13px;min-height:54px;border:0;border-bottom:1px solid #3b4158;cursor:pointer}.row:last-child{border-bottom:0}.row:hover,.row:focus-visible{background:#373d54;outline:0}.row strong{font-size:13px;font-weight:500;display:block;overflow-wrap:anywhere}.row small{display:block;color:#929fbe;font-size:11px;margin-top:3px}.state{color:#a7b5d9;font-size:12px;white-space:nowrap}.state span{font-size:17px;margin-left:5px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.button{font:inherit;border:1px solid #454b63;border-radius:7px;background:#343a50;color:#d4def5;cursor:pointer;padding:8px 12px}.button:hover,.button:focus-visible{background:#41475f;outline:1px solid #aaa0dc}.primary{background:#c3aaef;color:#211b30;border-color:transparent;font-weight:600}.primary:hover{background:#d4c1f5}.subtle{border:0;background:transparent;color:#bbc7e4;padding:5px 8px}.note{font-size:12px;color:#8f9cbc;margin-top:15px}.form{margin-top:14px;padding:14px;background:#2b3045;border:1px solid #3c425b;border-radius:9px}.form[hidden],.key[hidden]{display:none}.form label{display:block;color:#c1cce5;font-size:12px;margin-bottom:11px}.form input,.form select{display:block;margin-top:5px;width:100%;background:#21263a;border:1px solid #4a526e;border-radius:6px;color:#e0e7f8;font:13px inherit;font-family:inherit;padding:9px}.form input:focus,.form select:focus{outline:1px solid #b69be9}.error{color:#f3a2a9;min-height:0;margin:10px 0 0;overflow-wrap:anywhere}
+  </style></head><body data-agy-recovery><main><h1>Не удалось подключиться</h1><p>Antigravity не дождался ответа. Проверьте соединение или выберите другое подключение.</p><div class="section"><span>Подключения</span><button type="button" class="button subtle" data-recovery-add>+ Добавить</button></div><div class="list">${rows}<button class="row" type="button" data-recovery-direct><span><strong>Без прокси</strong><small>Прямое подключение</small></span><span class="state">Выбрать <span aria-hidden="true">›</span></span></button></div><form class="form" data-recovery-form hidden><label>Название<input name="name" required maxlength="80" autocomplete="off"></label><label>Тип подключения<select name="mode"><option value="socks5">SOCKS5</option><option value="socks4">SOCKS4</option><option value="http">HTTP / HTTPS proxy</option><option value="relay">Custom server / Worker</option></select></label><label>Адрес сервера<input name="endpoint" required placeholder="socks5://host:port" autocomplete="off"></label><label class="key" hidden>Ключ сервера<input name="secret" type="password" autocomplete="new-password"></label><div class="actions"><button type="submit" class="button primary">Сохранить и подключиться</button><button type="button" class="button" data-recovery-cancel>Отмена</button></div></form><div class="actions"><button class="button primary" type="button" data-recovery-retry>Повторить подключение</button></div><p class="error" role="alert" data-recovery-error></p><div class="note">Сохранённые подключения и данные аккаунтов останутся на месте.</div></main></body></html>`;
+}
 
 // Patch BrowserWindow constructor so DevTools is enabled even in production
 if (typeof BrowserWindow !== 'undefined' && typeof (BrowserWindow as any) === 'function') {
@@ -80,6 +88,22 @@ export function install(getLanguageServerPort: () => number): void {
     });
   }
 
+  const recoveryWindows = new Map<number, () => void>();
+  ipcMain.handle('agy-recovery:retry', (event) => {
+    const retry = recoveryWindows.get(event.sender.id);
+    if (retry) { retry(); return { success: true }; }
+    // A restored renderer may have a different WebContents identity from the
+    // original window. Only accept our own recovery document in that case.
+    const currentUrl = event.sender.getURL();
+    const port = getLanguageServerPort();
+    if (!currentUrl.startsWith('data:text/html;charset=utf-8,') || !currentUrl.includes('data-agy-recovery') || port <= 0) {
+      return { success: false, error: 'Сервер Antigravity ещё не готов. Попробуйте снова.' };
+    }
+    setTimeout(() => {
+      if (!event.sender.isDestroyed()) void event.sender.loadURL(`https://127.0.0.1:${port}/`).catch((error: unknown) => console.error('[Antigravity+] Recovery retry failed:', error));
+    }, 50);
+    return { success: true };
+  });
   registerCustomModelHandlers();
   installThemeIcons();
 
@@ -375,6 +399,18 @@ export function install(getLanguageServerPort: () => number): void {
 
     if (win.webContents && typeof win.webContents.on === 'function') {
       let loadRetries = 0;
+      let recoveryUrl = '';
+      const retryRecovery = () => {
+        if (!recoveryUrl) return;
+        const url = recoveryUrl;
+        recoveryUrl = '';
+        recoveryWindows.delete(win.webContents.id);
+        loadRetries = 0;
+        const port = getLanguageServerPort();
+        const nextUrl = port > 0 ? url.replace(/^(https?:\/\/(?:127\.0\.0\.1|localhost):)\d+/i, (_match: string, prefix: string) => prefix + port) : url;
+        setTimeout(() => { if (!win.isDestroyed()) void win.loadURL(nextUrl).catch((error: unknown) => console.error('[Antigravity+] Recovery retry failed:', error)); }, 50);
+      };
+      win.webContents.on('destroyed', () => recoveryWindows.delete(win.webContents.id));
       win.webContents.on('did-finish-load', () => { loadRetries = 0; });
       win.webContents.on('did-fail-load', (_event: any, code: number, description: string, url: string, isMainFrame: boolean) => {
         if (
@@ -385,6 +421,20 @@ export function install(getLanguageServerPort: () => number): void {
           (typeof win.isDestroyed === 'function' && win.isDestroyed())
         ) {
           return;
+        }
+        if (code === -7 && typeof url === 'string' && /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url)) {
+          let activeProxy = false;
+          try { activeProxy = require('./networkRoute').readSettings().mode !== 'direct'; } catch (error) { console.error('[Antigravity+] Unable to read network settings:', error); }
+          if (activeProxy) {
+            recoveryUrl = url;
+            recoveryWindows.set(win.webContents.id, retryRecovery);
+            let profiles: Array<{ id: string; name: string; mode: string }> = [], activeId: string | null = null;
+            try { ({ profiles, activeId } = require('./networkRoute').listProfiles()); }
+            catch (error) { console.error('[Antigravity+] Could not load saved connections:', error); }
+            const html = recoveryHtml(profiles, activeId);
+            void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((error: unknown) => console.error('[Antigravity+] Recovery page failed:', error));
+            return;
+          }
         }
         if (code === -7 && typeof url === 'string' && /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url) && loadRetries < 3) {
           loadRetries++;

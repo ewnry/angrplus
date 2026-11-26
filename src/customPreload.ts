@@ -1,6 +1,73 @@
 /** Custom-model UI, appended to the vendor preload. Sandboxed preloads require Electron only. */
 import { ipcRenderer, webFrame } from 'electron';
 
+function syncPlusLoginBrand(): void {
+  const existing = document.getElementById('agy-login-brand');
+  if (!location.pathname.startsWith('/onboarding')) { existing?.remove(); return; }
+  const heading = Array.from(document.querySelectorAll<HTMLElement>('h1,h2,div,p'))
+    .find(element => element.childElementCount === 0 && /^Welcome to Antigravity!?$/i.test(element.textContent?.trim() || ''));
+  if (!heading || existing) return;
+  const note = document.createElement('div');
+  note.id = 'agy-login-brand';
+  note.style.cssText = 'margin:8px 0 0;text-align:center;color:var(--muted-foreground,#92918a);font:13px/1.4 system-ui,sans-serif';
+  const name = document.createElement('strong');
+  name.textContent = 'Antigravity+';
+  name.style.cssText = 'display:block;color:var(--foreground,#e8e6e1);font-weight:600';
+  const thanks = document.createElement('span');
+  thanks.textContent = 'Спасибо, что выбрали нас';
+  note.append(name, thanks);
+  heading.insertAdjacentElement('afterend', note);
+}
+
+window.addEventListener('agy:plugin-request', (event: Event) => {
+  if (!['127.0.0.1', 'localhost'].includes(location.hostname)) return;
+  let request: any;
+  try { const detail = (event as CustomEvent<string>).detail; if (typeof detail !== 'string' || detail.length > 8192) return; request = JSON.parse(detail); } catch { return; }
+  if (typeof request?.requestId !== 'string' || request.requestId.length > 256 || typeof request.pluginId !== 'string') return;
+  void ipcRenderer.invoke('plus-plugin:call', request).then(value => {
+    window.dispatchEvent(new CustomEvent('agy:plugin-response', { detail: JSON.stringify({ requestId: request.requestId, value }) }));
+  }).catch((error: unknown) => {
+    window.dispatchEvent(new CustomEvent('agy:plugin-response', { detail: JSON.stringify({ requestId: request.requestId, error: error instanceof Error ? error.message : String(error) }) }));
+  });
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (!document.body?.hasAttribute('data-agy-recovery')) return;
+  const form = document.querySelector<HTMLFormElement>('[data-recovery-form]')!;
+  const error = document.querySelector<HTMLElement>('[data-recovery-error]')!;
+  const mode = form.elements.namedItem('mode') as HTMLSelectElement;
+  const endpoint = form.elements.namedItem('endpoint') as HTMLInputElement;
+  const key = form.querySelector<HTMLElement>('.key')!;
+  const showError = (message: string) => { error.textContent = message; };
+  const invoke = async (channel: string, ...args: unknown[]) => {
+    const result = await ipcRenderer.invoke(channel, ...args);
+    if (!result?.success) throw new Error(result?.error || 'Не удалось выполнить действие');
+    return result;
+  };
+  const retry = () => invoke('agy-recovery:retry');
+  mode.addEventListener('change', () => {
+    key.hidden = mode.value !== 'relay';
+    endpoint.placeholder = mode.value === 'relay' ? 'https://server.example' : mode.value === 'http' ? 'http://host:port' : `${mode.value}://host:port`;
+  });
+  document.addEventListener('click', (event) => {
+    const button = (event.target as Element)?.closest<HTMLButtonElement>('button');
+    if (!button) return;
+    if (button.hasAttribute('data-recovery-add')) { form.hidden = false; (form.elements.namedItem('name') as HTMLInputElement).focus(); }
+    else if (button.hasAttribute('data-recovery-cancel')) { form.hidden = true; showError(''); }
+    else if (button.hasAttribute('data-recovery-retry')) void retry().catch((err) => showError(err.message));
+    else if (button.hasAttribute('data-recovery-direct') || button.hasAttribute('data-recovery-profile')) {
+      const id = button.hasAttribute('data-recovery-direct') ? null : button.dataset.recoveryProfile;
+      void invoke('network-route:activate', id).then(retry).catch((err) => showError(err.message));
+    }
+  }, true);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const input = (name: string) => (form.elements.namedItem(name) as HTMLInputElement).value;
+    const profile = { name: input('name'), mode: mode.value, endpoint: endpoint.value, secret: mode.value === 'relay' ? input('secret') : '' };
+    void invoke('network-route:upsert', profile).then((result) => invoke('network-route:activate', result.id)).then(retry).catch((err) => showError(err.message));
+  });
+}, { once: true });
+
 function applyOldAntigravityTheme(enabled: boolean, flatNew = false): void {
   document.body.classList.toggle('agy-theme-antigravity-old', enabled);
   document.body.classList.toggle('agy-theme-antigravity-flatnew', enabled && flatNew);
@@ -81,17 +148,136 @@ type PlusPlugin = { id: string; name: string; code: string; enabled: boolean };
 type PlusCustomizations = { css: string; cssEnabled: boolean; themeScript?: string; themeSource?: string; plugins: PlusPlugin[] };
 let plusCustomizations: PlusCustomizations = { css: '', cssEnabled: false, plugins: [] };
 let plusPluginCleanup: Array<() => void> = [];
+function createPlusUiApi(): { ui: any; dispose: () => void } {
+  const cleanups = new Set<() => void>();
+  const find = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
+  const ui = Object.freeze({
+    find,
+    click: (selector: string): boolean => {
+      const target = find(selector);
+      if (!target || (target as HTMLButtonElement).disabled) return false;
+      target.click(); return true;
+    },
+    setValue: (selector: string, value: string): boolean => {
+      const target = find(selector);
+      if (!target) return false;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        const prototype = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(target, value);
+      } else if (target.isContentEditable) target.textContent = value;
+      else return false;
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    },
+    replace: (selector: string, render: (original: HTMLElement) => HTMLElement): (() => void) => {
+      if (typeof selector !== 'string' || typeof render !== 'function') throw new Error('ui.replace expects a selector and render function');
+      let original: HTMLElement | null = null, replacement: HTMLElement | null = null, stopped = false;
+      let oldDisplay = '', oldPriority = '';
+      const restore = () => {
+        if (original) { if (oldDisplay) original.style.setProperty('display', oldDisplay, oldPriority); else original.style.removeProperty('display'); }
+        replacement?.remove(); original = null; replacement = null;
+      };
+      const attach = () => {
+        if (stopped) return;
+        if (original?.isConnected && replacement?.isConnected) return;
+        restore();
+        const target = find(selector);
+        if (!target || !target.parentElement) return;
+        const node = render(target);
+        if (!(node instanceof HTMLElement) || node === target || node.contains(target)) throw new Error('ui.replace render must return a new HTML element');
+        original = target; replacement = node;
+        oldDisplay = target.style.getPropertyValue('display'); oldPriority = target.style.getPropertyPriority('display');
+        target.style.setProperty('display', 'none', 'important');
+        node.setAttribute('data-agy-custom-view', ''); target.after(node);
+      };
+      const observer = new MutationObserver(() => { try { attach(); } catch (error) { console.error('[Antigravity+ UI replace]', error); } });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      try { attach(); } catch (error) { observer.disconnect(); restore(); throw error; }
+      const dispose = () => { if (stopped) return; stopped = true; observer.disconnect(); restore(); cleanups.delete(dispose); };
+      cleanups.add(dispose); return dispose;
+    },
+  });
+  return { ui, dispose: () => { for (const cleanup of [...cleanups]) cleanup(); } };
+}
+function createPlusThemeServices() {
+  const subscriptions = new Set<() => void>();
+  const models = Object.freeze({
+    get: () => {
+      const props = getModelFiberProps();
+      const normalize = (option: any) => ({ label: String(option.label || ''), value: option.value, disabled: !!option.disabled });
+      return { ready: !!props, selected: props?.selectedModel ? normalize(props.selectedModel) : null, options: (props?.modelOptions || []).map(normalize) };
+    },
+    select: async (value: string | number) => { const props = getModelFiberProps(); const option = props?.modelOptions?.find((item: any) => String(item.value) === String(value) && !item.disabled); return !!option && await props.setSelectedModel(option) !== false; },
+    effort: () => {
+      const props = getModelFiberProps(), label = String(props?.selectedModel?.label || ''), current = modelFamily(label);
+      const options = ['Low', 'Medium', 'High'].filter(level => props?.modelOptions?.some((item: any) => !item.disabled && modelFamily(String(item.label || '')) === current && new RegExp(`\\b${level}\\b`, 'i').test(String(item.label || ''))));
+      return { selected: options.find(level => new RegExp(`\\b${level}\\b`, 'i').test(label)) || null, options };
+    },
+    setEffort: async (value: string) => ['Low', 'Medium', 'High'].includes(value) && await setAntigravityEffort(value as 'Low' | 'Medium' | 'High'),
+    subscribe: (callback: (state: any) => void) => {
+      if (typeof callback !== 'function') throw new Error('Expected a callback');
+      let last = '';
+      const emit = () => { const state = models.get(), serialized = JSON.stringify(state); if (serialized !== last) { last = serialized; callback(state); } };
+      const listener = () => emit();
+      window.addEventListener('agy:native-state', listener); emit();
+      const dispose = () => { window.removeEventListener('agy:native-state', listener); subscriptions.delete(dispose); };
+      subscriptions.add(dispose); return dispose;
+    },
+  });
+  const permissions = Object.freeze({
+    get: () => { const trigger = document.querySelector<HTMLButtonElement>('[data-testid="permissions-selector-trigger"]'); return { available: !!trigger && !trigger.disabled, selected: trigger?.textContent?.trim() || '' }; },
+    open: () => { const trigger = document.querySelector<HTMLButtonElement>('[data-testid="permissions-selector-trigger"]'); if (!trigger || trigger.disabled) return false; trigger.click(); return true; },
+    select: async (label: string) => {
+      const trigger = document.querySelector<HTMLButtonElement>('[data-testid="permissions-selector-trigger"]');
+      if (!trigger || trigger.disabled || !label.trim()) return false;
+      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
+      const deadline = Date.now() + 1500;
+      while (Date.now() < deadline) {
+        const controlled = trigger.getAttribute('aria-controls');
+        const menu = controlled ? document.getElementById(controlled) : document.querySelector('[role="menu"][data-state="open"], [role="listbox"][data-state="open"]');
+        const items = menu ? Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"], [role="option"], button')) : [];
+        const item = items.find(entry => !entry.hasAttribute('disabled') && [entry.getAttribute('aria-label'), entry.textContent, ...Array.from(entry.querySelectorAll('span, strong, div')).map(node => node.textContent)].some(text => (text || '').trim().toLowerCase() === label.trim().toLowerCase()));
+        if (item) { item.click(); return true; }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (trigger.getAttribute('aria-expanded') === 'true') trigger.click();
+      return false;
+    },
+  });
+  const layout = Object.freeze({
+    get: () => agyCurrentMode === 'home' ? 'cowork' : 'code',
+    set: (mode: string) => {
+      if (mode !== 'code' && mode !== 'cowork') return false;
+      document.body.classList.add('agy-custom-cowork-enabled');
+      setClaudeMode(mode === 'cowork' ? 'home' : 'code');
+      return true;
+    },
+    identity: async () => {
+      const status = await poolAPI.getStatus();
+      const account = status?.accounts?.find((entry: any) => entry.id === status.activeAccountId || entry.isActive);
+      return { name: String(account?.name || account?.label || account?.email?.split('@')[0] || ''), email: String(account?.email || '') };
+    },
+    openSettings: () => { openSettingsDialog(); return true; },
+    openAccounts: () => { if (openPoolModalFn) { openPoolModalFn(); return true; } const pill = document.querySelector<HTMLElement>('#agy-pool-pill'); if (!pill) return false; pill.click(); return true; },
+  });
+  return { models, permissions, layout, dispose: () => { for (const dispose of [...subscriptions]) dispose(); } };
+}
 function applyPlusCustomizations(): void {
   for (const cleanup of plusPluginCleanup.splice(0)) { try { cleanup(); } catch (error) { console.error('[Antigravity+ plugin cleanup]', error); } }
   document.getElementById('agy-user-custom-css')?.remove();
   if (plusCustomizations.cssEnabled && plusCustomizations.css) { const style = document.createElement('style'); style.id = 'agy-user-custom-css'; style.textContent = plusCustomizations.css; document.head.append(style); }
   if (plusCustomizations.cssEnabled && plusCustomizations.themeScript) {
-    try { const dispose = new Function('document', 'window', 'api', '"use strict";\n' + plusCustomizations.themeScript)(document, window, Object.freeze({ id: 'theme', log: (...args: any[]) => console.log('[Antigravity+ theme]', ...args), getModels: () => { const props = getModelFiberProps(); return { selected: props?.selectedModel?.label || '', options: (props?.modelOptions || []).map((x: any) => ({ label: String(x.label || ''), value: String(x.value), disabled: !!x.disabled })) }; }, selectModel: async (value: string) => { const props = getModelFiberProps(); const option = props?.modelOptions?.find((x: any) => String(x.value) === value && !x.disabled); return !!option && await props.setSelectedModel(option) !== false; }, setEffort: async (value: string) => { if (!['Low', 'Medium', 'High'].includes(value)) return false; return setAntigravityEffort(value as 'Low' | 'Medium' | 'High'); } })); if (typeof dispose === 'function') plusPluginCleanup.push(dispose); } catch (error) { console.error('[Antigravity+ theme]', error); }
+    const extension = createPlusUiApi(); plusPluginCleanup.push(extension.dispose);
+    const services = createPlusThemeServices(); plusPluginCleanup.push(services.dispose);
+    try { const dispose = new Function('document', 'window', 'api', '"use strict";\n' + plusCustomizations.themeScript)(document, window, Object.freeze({ id: 'theme', ui: extension.ui, ...services, log: (...args: any[]) => console.log('[Antigravity+ theme]', ...args), getModels: () => { const data = services.models.get(); return { selected: data.selected?.label || '', options: data.options.map((x: any) => ({ ...x, value: String(x.value) })) }; }, selectModel: services.models.select, setEffort: services.models.setEffort })); if (typeof dispose === 'function') plusPluginCleanup.push(dispose); } catch (error) { console.error('[Antigravity+ theme]', error); }
   }
   for (const plugin of plusCustomizations.plugins) {
     if (!plugin.enabled) continue;
     try {
-      const dispose = new Function('document', 'window', 'api', '"use strict";\n' + plugin.code)(document, window, Object.freeze({ id: plugin.id, log: (...args: any[]) => console.log('[Antigravity+ ' + plugin.id + ']', ...args) }));
+      const extension = createPlusUiApi(); plusPluginCleanup.push(extension.dispose);
+      const services = createPlusThemeServices(); plusPluginCleanup.push(services.dispose);
+      const dispose = new Function('document', 'window', 'api', '"use strict";\n' + plugin.code)(document, window, Object.freeze({ id: plugin.id, ui: extension.ui, ...services, log: (...args: any[]) => console.log('[Antigravity+ ' + plugin.id + ']', ...args) }));
       if (typeof dispose === 'function') plusPluginCleanup.push(dispose);
     } catch (error) { console.error('[Antigravity+ plugin ' + plugin.id + ']', error); }
   }
@@ -453,7 +639,7 @@ class CoworkView {
 let coworkView: CoworkView | null = null;
 function syncCoworkView(): void {
   if (!coworkView) coworkView = new CoworkView((channel, ...args) => ipcRenderer.invoke(channel, ...args));
-  coworkView.sync(agyCurrentMode === 'home' && document.body.classList.contains('agy-theme-claude'));
+  coworkView.sync(agyCurrentMode === 'home' && (document.body.classList.contains('agy-theme-claude') || document.body.classList.contains('agy-custom-cowork-enabled')));
 }
 
 let openPoolModalFn: (() => void) | null = null;
@@ -1253,7 +1439,7 @@ body.agy-theme-claude [data-testid="user-input-step"] > .w-full > .relative,
 body.agy-theme-claude [data-testid="user-input-step"] div[class*="bg-"]:has(> [data-quotable]) { background:#292928!important; border:0!important; border-radius:16px!important; padding:0!important; }
 body.agy-theme-claude [data-testid="user-input-step"] > .w-full > .relative > .relative { background:#292928!important; border-radius:16px!important; padding:11px 15px!important; }
 body.agy-theme-claude [data-testid="user-input-step"] :is(.bg-card,.bg-card-border):has([data-quotable]):not(.user-input-buttons-container) { background:#292928!important; }
-body.agy-theme-claude [data-testid="user-input-step"]:has(.agy-message-actions) .user-input-buttons-container { display:none!important; }
+body.agy-theme-claude [data-testid="user-input-step"]:has(.agy-message-actions) :is(.user-input-buttons-container, [data-testid="user-message-actions"]) { display:none!important; }
 body.agy-theme-claude [role="article"][aria-label="User message"] :is(button[aria-label="Copy"],button[aria-label="Undo to this point"]) { display:none!important; }
 
 body.agy-theme-claude [data-testid="user-input-step"] [data-quotable] { font-size:15px!important; line-height:1.55!important; color:#e1e0d9!important; }
@@ -1348,17 +1534,30 @@ body.agy-theme-claude [data-testid="project-header"] { margin-top:0; height:32px
 body.agy-theme-claude [role="navigation"][aria-label="Sidebar"] > .overflow-y-auto { overflow-anchor:none; scrollbar-gutter:stable; }
 body.agy-theme-claude #agy-claude-sidebar-header, body.agy-theme-claude #agy-claude-user-card { flex-shrink:0; }
 body.agy-theme-claude [data-testid="section-header"], body.agy-theme-claude [data-testid="pinned-section-header"] { background:transparent!important; color:#92918a!important; }
-body.agy-theme-claude [data-agy-new-chat] { padding:60px 0 12px!important; gap:24px!important; animation:none!important; }
+body.agy-theme-claude [data-agy-new-chat] { padding:24px 0 12px!important; gap:24px!important; animation:none!important; }
 body.agy-theme-claude [data-agy-new-chat] > :not(#agy-new-chat-welcome) { margin-top:auto; max-width:50rem; }
 body.agy-theme-claude #agy-new-chat-welcome { display:flex; align-items:center; gap:9px; width:100%; max-width:48rem; padding:0 16px; box-sizing:border-box; }
 body.agy-theme-claude #agy-new-chat-welcome > svg { color:#d97757; width:25px; height:25px; flex-shrink:0; }
 body.agy-theme-claude #agy-new-chat-welcome h1 { font-size:22px; line-height:1.4; font-weight:500; margin:0; color:#e1e0d9; }
+/* Newer Antigravity adds its own top spacing and a full-width composer wrapper. */
+body.agy-theme-claude #root { margin-top:6px!important; height:calc(100vh - 6px)!important; }
+body.agy-theme-claude #root div.h-screen.w-screen.flex.flex-col { height:calc(100vh - 6px)!important; }
+body.agy-theme-claude [data-agy-new-chat] { padding-top:8px!important; }
+body.agy-theme-claude [data-agy-new-chat] #agy-new-chat-welcome { justify-content:center!important; margin:0 auto!important; }
+body.agy-theme-claude [data-testid="agent-input-box"] { width:min(670px,calc(100% - 32px))!important; max-width:670px!important; margin-left:auto!important; margin-right:auto!important; }
+body.agy-theme-claude #agy-claude-project-pills { margin:0 auto 6px!important; width:min(670px,calc(100% - 32px))!important; box-sizing:border-box!important; }
+body.agy-theme-claude #agy-claude-composer-footer { width:100%!important; }
+body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] { width:100%!important; }
+body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] { min-height:42px!important; box-sizing:border-box!important; }
+body.agy-theme-claude #agy-claude-composer-footer { position:relative!important; margin-top:6px!important; min-height:32px!important; padding:0 4px!important; z-index:12!important; box-sizing:border-box!important; }
+
+
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] { background:#20201f!important; border:1px solid #484845!important; border-radius:14px!important; padding:0!important; box-shadow:none!important; outline:none!important; }
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"]:focus-within { border-color:#65645f!important; box-shadow:none!important; outline:none!important; }
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] > div { background:transparent!important; border-radius:14px!important; padding:0!important; }
-body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] [contenteditable="true"] { min-height:46px!important; padding:11px 42px 11px 13px!important; line-height:24px!important; font-size:15px!important; font-weight:400!important; border:0!important; box-shadow:none!important; outline:none!important; }
-body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] [contenteditable="true"] + p { left:13px!important; top:11px!important; right:42px!important; font-size:15px!important; font-weight:400!important; line-height:24px!important; opacity:1!important; color:#92918a!important; }
-body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] .agy-enter-btn { right:8px!important; bottom:9px!important; width:28px!important; height:28px!important; background:transparent!important; border:0!important; border-radius:6px!important; color:#92918a!important; box-shadow:none!important; }
+body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] [contenteditable="true"] { min-height:40px!important; padding:10px 42px 10px 13px!important; line-height:20px!important; font-size:15px!important; font-weight:400!important; border:0!important; box-shadow:none!important; outline:none!important; }
+body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] [contenteditable="true"] + p { left:13px!important; top:10px!important; right:42px!important; font-size:15px!important; font-weight:400!important; line-height:20px!important; opacity:1!important; color:#92918a!important; }
+body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] .agy-enter-btn { right:8px!important; bottom:6px!important; width:28px!important; height:28px!important; background:transparent!important; border:0!important; border-radius:6px!important; color:#92918a!important; box-shadow:none!important; }
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] .agy-enter-btn.active { color:#e1e0d9!important; }
 body.agy-theme-claude div[id="antigravity.agentSidePanelInputBox"] .agy-enter-btn:hover { background:#ffffff0a!important; }
 body.agy-theme-claude #agy-btn-attach { border:0!important; background:transparent!important; width:24px; height:24px; }
@@ -1392,7 +1591,7 @@ body.agy-theme-claude .agy-history-note { font-size:10px; margin:8px 0 0; color:
 body.agy-theme-claude .agy-history-empty { min-height:160px; display:flex; align-items:flex-end; margin:0; }
 @media(max-height:640px) { body.agy-theme-claude #agy-chat-history-overview { max-width:28rem; } body.agy-theme-claude .agy-history-heatmap { gap:2px; } }
 
-body.agy-theme-claude [data-agy-new-chat] > :has([data-testid="agent-input-box"]) { margin-top:auto!important; }
+body.agy-theme-claude [data-agy-new-chat] > :has([data-testid="agent-input-box"]) { margin-top:auto!important; margin-inline:auto!important; width:100%; }
 body.agy-theme-claude [data-agy-new-chat] > .px-4:has(> div:only-child:empty) { display:none; }
 body.agy-theme-claude [data-agy-new-chat="v229"] [data-testid="home-greeting"] { display:none!important; }
 body.agy-theme-claude [data-agy-new-chat="v229"] { align-items:stretch!important; }
@@ -1608,6 +1807,7 @@ body.agy-theme-claude [data-testid="user-input-step"] .agy-message-actions { dis
 body.agy-theme-claude [data-testid="user-input-step"]:hover .agy-message-actions, body.agy-theme-claude [data-testid="user-input-step"]:focus-within .agy-message-actions { opacity:1; }
 body.agy-theme-claude .agy-message-actions > span { font-size:11px; margin-right:5px; max-width:380px; }
 body.agy-theme-claude .agy-message-actions button { display:flex; align-items:center; justify-content:center; width:25px; height:25px; padding:4px; color:#92918a; background:transparent; border:0; border-radius:5px; cursor:pointer; }
+body.agy-theme-claude .agy-message-actions button[hidden] { display:none; }
 body.agy-theme-claude .agy-message-actions button:hover { color:#e1e0d9; background:#ffffff0a; }
 body.agy-theme-claude .agy-message-actions button:focus-visible { outline:1px solid #b8b7af; }
 body.agy-theme-claude [data-agy-editing] > .w-full, body.agy-theme-claude [data-agy-editing] > .agy-message-actions { display:none!important; }
@@ -2042,7 +2242,7 @@ function setupNativeControlBridge(): void {
 }
 
 function modelFamily(label: string): string {
-  return label.replace(/\s*\((?:Low|Medium|High|Thinking|Auto)\)\s*$/i, '').trim();
+  return label.replace(/\s*\((?:Low|Medium|High)\)\s*$/i, '').trim();
 }
 
 // ─── React Fiber Integration for Silent Model & Effort Switching ───────
@@ -3429,7 +3629,7 @@ function syncMessageControls(): void {
     }
     if (claude && !step.querySelector('.agy-message-actions')) {
       const toolbar = document.createElement('div'); toolbar.className = 'agy-message-actions';
-      const timestamp = document.createElement('span'); timestamp.textContent = step.querySelector('.user-input-buttons-container > span')?.textContent || '';
+      const timestamp = document.createElement('span'); timestamp.textContent = step.querySelector(':is(.user-input-buttons-container, [data-testid="user-message-actions"]) > span')?.textContent || '';
       const retry = document.createElement('button'); retry.type = 'button'; retry.title = 'Retry response'; retry.setAttribute('aria-label', 'Retry response'); retry.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg>';
       retry.addEventListener('click', async () => {
         if (retry.disabled) return; retry.disabled = true;
@@ -3443,7 +3643,20 @@ function syncMessageControls(): void {
       const copy = document.createElement('button'); copy.type = 'button'; copy.title = 'Copy message'; copy.setAttribute('aria-label', 'Copy message');
       copy.innerHTML = step.querySelector('button[aria-label="Copy"]')?.innerHTML || CLAUDE_ICONS.paperclip;
       copy.addEventListener('click', () => { void navigator.clipboard.writeText(step.querySelector('.agy-revised-message-text')?.textContent || raw?.textContent || '').catch(() => { timestamp.textContent = 'Could not copy'; }); });
-      toolbar.append(timestamp, retry, edit, copy); step.append(toolbar);
+      const revert = document.createElement('button');
+      revert.type = 'button';
+      revert.className = 'agy-message-revert';
+      revert.title = 'Undo to this point';
+      revert.setAttribute('aria-label', revert.title);
+      revert.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 8-5 5 5 5M4 13h11a4 4 0 0 0 0-8"/></svg>';
+      revert.addEventListener('click', () => step.querySelector<HTMLButtonElement>('[data-testid="revert-button"]')?.click());
+      toolbar.append(timestamp, retry, edit, copy, revert); step.append(toolbar);
+    }
+    const revert = step.querySelector<HTMLButtonElement>('.agy-message-revert');
+    if (revert) {
+      const nativeRevert = step.querySelector<HTMLButtonElement>('[data-testid="revert-button"]');
+      if (revert.hidden !== !nativeRevert) revert.hidden = !nativeRevert;
+      if (revert.disabled !== !!nativeRevert?.disabled) revert.disabled = !!nativeRevert?.disabled;
     }
   }
   const fingerprint = `${conversation}:${steps.map((step) => step.dataset.agyMessageKey).join(',')}`;
@@ -3717,12 +3930,14 @@ function morphToClaudeDesktop(): void {
     }
     updateEnterBtnState();
 
-    // Bottom controls (NO AUTO, BIGGER PLUS)
+    // Keep the toolbar separate from the native input box.
     let footer = document.getElementById('agy-claude-composer-footer');
     if (!footer) {
       footer = document.createElement('div');
       footer.id = 'agy-claude-composer-footer';
       footer.className = 'agy-composer-footer';
+      footer.setAttribute('role', 'group');
+      footer.setAttribute('aria-label', 'Message options');
       footer.innerHTML = `
         <div class="agy-composer-footer-left">
           <button type="button" class="agy-btn-plus-big" id="agy-btn-attach" title="Add context (Ctrl+U)">${CLAUDE_ICONS.plus}</button>
@@ -3736,13 +3951,13 @@ function morphToClaudeDesktop(): void {
           </button>
         </div>
       `;
-      inputBox.parentElement?.insertBefore(footer, inputBox.nextSibling);
+      inputBox.after(footer);
 
       // Composer clicks are handled once by attachClaudeDelegation.
     }
 
     // React can replace or move the native composer without removing our siblings.
-    if (inputBox.nextSibling !== footer) inputBox.after(footer);
+    if (inputBox.nextElementSibling !== footer) inputBox.after(footer);
 
     // Disclaimer
     let disclaimer = document.getElementById('agy-claude-disclaimer');
@@ -3751,12 +3966,12 @@ function morphToClaudeDesktop(): void {
       disclaimer.id = 'agy-claude-disclaimer';
       disclaimer.className = 'agy-claude-disclaimer';
       disclaimer.textContent = 'Claude is AI and can make mistakes. Please double-check responses.';
-      footer?.parentElement?.insertBefore(disclaimer, footer.nextSibling);
+      footer.after(disclaimer);
     }
     const targetDisp = agyCurrentMode === 'code' ? 'none' : 'block';
     if (disclaimer.style.display !== targetDisp) disclaimer.style.display = targetDisp;
 
-    if (footer.nextSibling !== disclaimer) footer.after(disclaimer);
+    if (footer.nextElementSibling !== disclaimer) footer.after(disclaimer);
     const editor = inputBox.querySelector<HTMLElement>('[contenteditable="true"]');
     const placeholder = editor?.nextElementSibling;
     if (placeholder?.tagName === 'P' && placeholder.classList.contains('pointer-events-none')) {
@@ -4570,6 +4785,13 @@ window.addEventListener('DOMContentLoaded', () => {
         color: #f4f4f5;
         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         box-sizing: border-box;
+      }
+      /* General+ is inside the native settings dialog and follows its font size and theme. */
+      #agy-general-plus-panel {
+        font: inherit;
+        color: inherit;
+        padding: 0;
+        max-width: none;
       }
       .agy-native-header {
         margin-bottom: 24px;
@@ -6754,7 +6976,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const wrap = element('div', 'flex flex-col gap-1.5 w-full');
     const inner = element('div', 'flex flex-wrap items-center justify-between gap-2 w-full');
     const titleRow = element('div', 'flex items-center gap-2 shrink-0');
-    const h3 = element('h3', 'm-0 text-sm font-semibold text-foreground whitespace-nowrap', title);
+    const h3 = element('h3', 'agy-general-section-title m-0 font-medium text-foreground whitespace-nowrap', title);
     titleRow.append(h3);
     if (badge !== undefined && badge !== null) {
       const b = element(
@@ -6774,7 +6996,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function createNativeCard(): HTMLElement {
-    return element('div', 'agy-general-card bg-transparent rounded-xl border border-border overflow-hidden divide-y divide-border');
+    return element('div', 'agy-card agy-general-card bg-transparent rounded-xl border border-border overflow-hidden divide-y divide-border');
   }
 
   function createNativeRow(title: string, desc: string, control: HTMLElement): HTMLElement {
@@ -6782,9 +7004,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const left = element('div', 'flex-1 flex flex-col gap-0.5');
     const titleWrap = element('div', 'flex items-center gap-1.5');
-    titleWrap.append(element('span', 'text-sm font-medium text-foreground', title));
+    titleWrap.append(element('span', 'agy-general-row-title text-foreground', title));
 
-    const descWrap = element('span', 'text-xs text-muted-foreground whitespace-pre-wrap', desc);
+    const descWrap = element('span', 'agy-general-row-description text-muted-foreground whitespace-pre-wrap', desc);
     left.append(titleWrap, descWrap);
 
     const right = element('div', 'shrink-0 flex items-center gap-2');
@@ -6840,7 +7062,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const wrap = document.createElement('div'); wrap.style.cssText = 'position:relative;min-width:145px';
       const trigger = document.createElement('button'); trigger.type = 'button';
       trigger.className = 'agy-general-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
-      trigger.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:1px solid var(--border, #454756);border-radius:8px;padding:7px 10px;background:var(--secondary, #303245);color:var(--foreground, #e1e2ee);font:inherit;font-size:12px;cursor:pointer';
+      trigger.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:0;border-radius:9999px;padding:4px 10px;background:var(--secondary, #303245);color:var(--foreground, #e1e2ee);font:inherit;font-size:12px;cursor:pointer';
       const label = document.createElement('span'); label.textContent = options.find(x => x.value === selectedValue)?.label || '';
       const arrow = document.createElement('span'); arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '⌄'; trigger.append(label, arrow); wrap.append(trigger);
       let menu: HTMLElement | null = null;
@@ -6881,7 +7103,7 @@ window.addEventListener('DOMContentLoaded', () => {
   ): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `inline-flex items-center font-medium transition-colors select-none outline-none cursor-pointer justify-center whitespace-nowrap shrink-0 disabled:opacity-50 ${
+    btn.className = `agy-button agy-button-xs inline-flex items-center font-medium transition-colors select-none outline-none cursor-pointer justify-center whitespace-nowrap shrink-0 disabled:opacity-50 ${
       primary
         ? 'bg-primary text-primary-foreground hover:bg-primary/90'
         : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
@@ -6914,15 +7136,18 @@ window.addEventListener('DOMContentLoaded', () => {
     const settingsStyle = document.createElement('style');
     settingsStyle.textContent = `
 body:not(.agy-theme-antigravity-old):not(.agy-theme-claude) #agy-general-plus-panel .agy-general-card,
-body.agy-theme-antigravity-flatnew #agy-general-plus-panel .agy-general-card { background:var(--card, #292b3b)!important;border:1px solid var(--border, #414355)!important;border-radius:12px!important; }
+body.agy-theme-antigravity-flatnew #agy-general-plus-panel .agy-general-card { background:transparent!important;border:1px solid var(--border, #414355)!important;border-radius:16px!important; }
 body:not(.agy-theme-antigravity-old):not(.agy-theme-claude) #agy-general-plus-panel .agy-general-row,
-body.agy-theme-antigravity-flatnew #agy-general-plus-panel .agy-general-row { padding:12px 14px!important; }
+body.agy-theme-antigravity-flatnew #agy-general-plus-panel .agy-general-row { padding:8px 12px!important; }
+#agy-general-plus-panel .agy-general-section-title { font-size:inherit; font-weight:450; line-height:inherit; }
+#agy-general-plus-panel .agy-general-row-title { font-size:inherit; font-weight:inherit; line-height:inherit; }
+#agy-general-plus-panel .agy-general-row-description { font-size:0.857em; font-weight:inherit; line-height:1.35; }
 body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!important; }
 .agy-general-select-trigger:focus-visible,.agy-general-select-menu button:focus-visible { outline:2px solid var(--ring, #aab7dd)!important;outline-offset:2px; }
 `;
     container.append(settingsStyle);
 
-    const inner = element('div', 'p-6 flex flex-col gap-6 w-full box-border');
+    const inner = element('div', 'agy-general-inner p-6 flex flex-col gap-4 w-full max-w-2xl mx-auto box-border');
     container.append(inner);
 
     const header = element('div', 'flex flex-col gap-1 w-full bg-transparent');
@@ -6930,12 +7155,12 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
       <div class="flex justify-between items-start gap-4 w-full bg-transparent">
         <div class="flex-1 flex flex-col gap-1 min-w-0 bg-transparent">
           <h2 class="text-xl m-0 font-medium truncate flex-1 text-foreground">General+</h2>
-          <div class="text-xs text-muted-foreground whitespace-pre-wrap">Configure Antigravity+ multi-account pooling, hot-swapping, limits, and sound alerts.</div>
+          <div class="text-sm text-muted-foreground whitespace-pre-wrap">Configure Antigravity+ multi-account pooling, hot-swapping, limits, and sound alerts.</div>
         </div>
       </div>
     `;
 
-    const contentArea = element('div', 'flex flex-col gap-6 w-full');
+    const contentArea = element('div', 'flex flex-col gap-8 w-full');
     inner.append(header, contentArea);
 
 
@@ -7022,6 +7247,59 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
         sec1.append(poolCard);
         contentArea.append(sec1);
 
+        const netResult = await ipcRenderer.invoke('network-route:list');
+        const networkSection = element('div', 'space-y-2');
+        const networkCard = createNativeCard();
+        if (!netResult?.success) {
+          networkSection.append(createNativeSectionHeader('Google connections'));
+          networkCard.append(createNativeRow('Connection unavailable', netResult?.error || 'Could not load connection settings.', element('span')));
+        } else {
+          type NetMode = 'direct' | 'socks4' | 'socks5' | 'http' | 'relay';
+          type NetworkProfile = {id:string;name:string;mode:NetMode;endpoint:string;hasSecret:boolean};
+          const modes: Array<{value:NetMode;label:string}> = [{value:'socks4',label:'SOCKS4 / SOCKS4a'}, {value:'socks5',label:'SOCKS5'}, {value:'http',label:'HTTP / HTTPS proxy'}, {value:'relay',label:'Custom server / Worker'}];
+          networkSection.append(createNativeSectionHeader('Google connections', createNativeButton('Add connection',()=>showNetworkEditor(),true), netResult.profiles.length));
+          const perform = async (channel:string, value:unknown) => {const result=await ipcRenderer.invoke(channel,value);if(!result?.success){showToast(result?.error || 'Could not update connection');return false;}await refresh();return true;};
+          const directControls=element('div','flex items-center gap-2');
+          directControls.append(netResult.activeId ? createNativeButton('Use',()=>perform('network-route:activate',null).then(()=>{})) : element('span','text-xs text-muted-foreground','Active'));
+          networkCard.append(createNativeRow('Direct', 'Connect to Google without a proxy.', directControls));
+          for (const profile of netResult.profiles as NetworkProfile[]) {
+            const controls=element('div','flex items-center gap-2');
+            controls.append(netResult.activeId===profile.id ? element('span','text-xs text-muted-foreground','Active') : createNativeButton('Use',()=>perform('network-route:activate',profile.id).then(()=>{})));
+            controls.append(createNativeButton('Edit',()=>showNetworkEditor(profile)),createNativeButton('Delete',()=>perform('network-route:delete',profile.id).then(()=>{})));
+            networkCard.append(createNativeRow(profile.name,`${modes.find(mode=>mode.value===profile.mode)?.label || profile.mode} · ${profile.endpoint}`,controls));
+          }
+          if (!netResult.profiles.length) networkCard.append(createNativeRow('No connections added', 'Add a proxy or custom server to route Google requests.', element('span')));
+          function showNetworkEditor(profile?:NetworkProfile):void {
+            const {body,status,close}=openModal(profile?'Edit connection':'Add connection');
+            const card=body.closest<HTMLElement>('#agy-modal-card'); if(card) card.style.width='520px';
+            body.append(element('p','agy-muted','Choose how Antigravity+ connects to Google. Other providers keep their own connections.'));
+            const name=field(body,'Name','agy-network-name',profile?.name || ''); name.placeholder='For example, Home proxy';
+            const type=selectField(body,'Connection type','agy-network-mode',modes.map(mode=>[mode.value,mode.label]),profile?.mode || 'socks5');
+            const address=field(body,'Server address','agy-network-address',profile?.endpoint || '','url');
+            const hint=element('p','agy-muted'); body.append(hint);
+            const key=field(body,'Server key','agy-network-key','','password'); key.autocomplete='new-password';
+            key.placeholder=profile?.hasSecret ? 'Saved — leave empty to keep' : 'Enter relay key';
+            const keyField=key.closest<HTMLElement>('label')!;
+            const updateFields=()=>{
+              const mode=type.value as NetMode;
+              const relay=mode==='relay';keyField.hidden=!relay;key.disabled=!relay;
+              address.placeholder=mode==='socks4'?'socks4a://host:1080':mode==='socks5'?'socks5h://host:1080':mode==='http'?'http://host:8080':'https://relay.example';
+              hint.textContent=relay?'Use an HTTPS server that implements the AG+ relay protocol.':'Optional proxy credentials can be included in the address: user:password@host.';
+            };
+            type.addEventListener('change',updateFields);updateFields();
+            const actions=element('div','agy-actions');
+            actions.append(button('Cancel',close,status),button('Save connection',async()=>{
+              if (!name.value.trim()) {setStatus(status,'Enter a connection name.',true);name.focus();return;}
+              if (!address.value.trim()) {setStatus(status,'Enter the server address.',true);address.focus();return;}
+              const result=await ipcRenderer.invoke('network-route:upsert',{id:profile?.id,name:name.value,mode:type.value,endpoint:address.value,secret:key.disabled?'':key.value});
+              if(!result?.success){setStatus(status,result?.error || 'Could not save connection.',true);return;}
+              close();await refresh();
+            },status,true));
+            body.append(actions);name.focus();
+          }
+        }
+        networkSection.append(networkCard); contentArea.append(networkSection);
+
         // File-based plugins are managed independently from inline theme scripts.
         const pluginsSec = element('div', 'space-y-2');
         pluginsSec.append(createNativeSectionHeader('Plugins'));
@@ -7043,7 +7321,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
             await refresh();
           })));
         }
-        pluginsSec.append(pluginsCard); contentArea.append(pluginsSec);
+        pluginsSec.append(pluginsCard);
 
         // --- SECTION 2: Audio Notifications ---
         const sec2 = element('div', 'space-y-2');
@@ -7172,7 +7450,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
           ),
         );
         themeSec.append(themeCard);
-        contentArea.append(themeSec);
+        contentArea.append(themeSec, pluginsSec);
 
         // --- SECTION: Administrator Mode ---
         const adminSec = element('div', 'space-y-2');
@@ -7861,13 +8139,13 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
     plusTab.setAttribute('data-agy-tab', 'general-plus');
     plusTab.setAttribute('data-testid', 'settings-nav-item-GeneralPlus');
 
-    plusTab.className =
-      'flex items-center gap-1.5 group mx-2 px-2 py-1 rounded-lg cursor-pointer border-none text-left transition-all outline-none hover:bg-sidebar-muted';
+    plusTab.className = generalTab.className.replace(/\bbg-sidebar-secondary\b/g, '').trim();
+    if (!plusTab.classList.contains('hover:bg-sidebar-muted')) plusTab.classList.add('hover:bg-sidebar-muted');
     const span = plusTab.querySelector('span');
     if (span) {
       span.textContent = 'General+';
       span.className =
-        'text-sm transition-colors select-none truncate flex-1 text-secondary-foreground group-hover:text-foreground';
+        'transition-colors select-none truncate flex-1 text-secondary-foreground group-hover:text-foreground';
     } else {
       plusTab.textContent = 'General+';
     }
@@ -7894,13 +8172,16 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
   }
 
   function activateGeneralPlusTab(plusTab: HTMLElement, _generalTab?: HTMLElement): void {
-    plusTab.className =
-      'flex items-center gap-1.5 group mx-2 px-2 py-1 rounded-lg cursor-pointer border-none text-left transition-all outline-none bg-sidebar-secondary agy-active-tab';
-    plusTab.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-    plusTab.style.borderRadius = '8px';
+    plusTab.classList.add('bg-sidebar-secondary', 'agy-active-tab');
+    plusTab.classList.remove('hover:bg-sidebar-muted');
+    const generalTab = _generalTab || findSettingsGeneralTab();
+    if (generalTab?.classList.contains('bg-sidebar-secondary')) {
+      generalTab.dataset.agyWasActive = 'true';
+      generalTab.classList.remove('bg-sidebar-secondary');
+    }
     const plusSpan = plusTab.querySelector('span');
     if (plusSpan) {
-      plusSpan.className = 'text-sm transition-colors select-none truncate flex-1 text-foreground';
+      plusSpan.className = 'transition-colors select-none truncate flex-1 text-foreground';
     }
 
     const contentPane = findSettingsContentPane();
@@ -7925,7 +8206,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
     panel.style.backgroundColor = 'var(--background, #121316)';
     panel.style.color = 'var(--foreground, #f3f4f6)';
     panel.style.position = 'relative';
-    panel.style.zIndex = '30';
+    panel.style.zIndex = '';
 
     void buildNativeGeneralPlusUI(panel);
   }
@@ -7933,16 +8214,19 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
   function deactivateGeneralPlusTab(plusTab?: HTMLElement): void {
     const tab = plusTab || document.getElementById('agy-tab-general-plus');
     if (tab) {
-      tab.className =
-        'flex items-center gap-1.5 group mx-2 px-2 py-1 rounded-lg cursor-pointer border-none text-left transition-all outline-none hover:bg-sidebar-muted';
-      tab.style.backgroundColor = 'transparent';
+      tab.classList.add('hover:bg-sidebar-muted');
       tab.classList.remove('agy-active-tab');
       tab.classList.remove('bg-sidebar-secondary');
       const span = tab.querySelector('span');
       if (span) {
         span.className =
-          'text-sm transition-colors select-none truncate flex-1 text-secondary-foreground group-hover:text-foreground';
+          'transition-colors select-none truncate flex-1 text-secondary-foreground group-hover:text-foreground';
       }
+    }
+    const generalTab = findSettingsGeneralTab();
+    if (generalTab?.dataset.agyWasActive) {
+      generalTab.classList.add('bg-sidebar-secondary');
+      delete generalTab.dataset.agyWasActive;
     }
 
     const panel = document.getElementById('agy-general-plus-panel');
@@ -8226,6 +8510,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
         applyOldAntigravityTheme(false);
         applyClaudeTheme(false);
       });
+    syncPlusLoginBrand();
     applyAntigravityPlusBranding();
     injectPoolStatusPill();
     injectGeneralPlusTab();
@@ -8250,6 +8535,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
         pending = undefined;
         if (typeof document === 'undefined' || !document || !document.body) return;
         syncGeoErrorHint();
+        syncPlusLoginBrand();
         syncPlusMenuVersion();
         syncInsightsUi(); syncEnvironmentControl();
         applyAntigravityPlusBranding();

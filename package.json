@@ -1,7 +1,7 @@
 {
   "name": "antigravity-plus",
   "productName": "Antigravity+",
-  "version": "2.1.18",
+  "version": "2.1.20",
   "description": "Antigravity+ — Antigravity, but better. Multi-account quota pool, seamless hot-swap & custom models.",
   "homepage": "https://t.me/unixmk",
   "author": {
@@ -14,7 +14,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "npx tsc",
+    "build": "npx tsc && esbuild src/networkRoute.ts --bundle --platform=node --target=node20 --format=cjs --external:electron --external:./cryptoStore --outfile=dist/networkRoute.js",
     "dev": "npx tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,7 +40,10 @@
     "chrome-devtools-mcp": "^0.23.0",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3",
-    "shell-env": "^4.0.3"
+    "esbuild": "^0.28.2",
+    "https-proxy-agent": "^9.1.0",
+    "shell-env": "^4.0.3",
+    "socks-proxy-agent": "^10.1.0"
   },
   "devDependencies": {
     "@electron/asar": "4.3.0",

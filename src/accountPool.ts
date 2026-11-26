@@ -5,6 +5,7 @@
 
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { requestGoogle } from './networkRoute';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -12,7 +13,7 @@ import { app } from 'electron';
 import log from 'electron-log';
 import { loginGoogleAccount } from './googleOAuth';
 
-// OAuth credentials are intentionally excluded from source. Configure the variables below before running.
+// OAuth credentials are supplied by the environment in public builds.
 export const ANTIGRAVITY_CLIENT_ID = process.env.ANTIGRAVITY_OAUTH_CLIENT_ID || '';
 export const ANTIGRAVITY_CLIENT_SECRET = process.env.ANTIGRAVITY_OAUTH_CLIENT_SECRET || '';
 export const CLOUDCODE_ENDPOINT = 'https://daily-cloudcode-pa.googleapis.com';
@@ -283,7 +284,7 @@ export async function enrichAccountProfile(accountId: string): Promise<void> {
     const validAcc = await refreshPooledAccount(account);
     const fetchJson = (url: string): Promise<Record<string, unknown> | null> => {
       return new Promise((resolve) => {
-        const req = https.request(url, {
+        const req = requestGoogle(url, {
           headers: { Authorization: `Bearer ${validAcc.accessToken}` },
         }, (res) => {
           let data = '';
@@ -368,7 +369,7 @@ async function refreshPooledAccountOnce(account: PooledAccount): Promise<PooledA
     if (clientSecret) body.set('client_secret', clientSecret);
 
     const bodyStr = body.toString();
-    const req = https.request('https://oauth2.googleapis.com/token', {
+    const req = requestGoogle('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -439,7 +440,7 @@ export async function fetchAccountQuota(account: PooledAccount, rawHeaders?: htt
   const reqBody = JSON.stringify(account.project ? { project: account.project } : {});
 
   return new Promise((resolve) => {
-    const req = https.request(`${CLOUDCODE_ENDPOINT}/v1internal:retrieveUserQuotaSummary`, {
+    const req = requestGoogle(`${CLOUDCODE_ENDPOINT}/v1internal:retrieveUserQuotaSummary`, {
       method: 'POST',
       headers: { ...headers, 'Content-Length': Buffer.byteLength(reqBody) },
     }, (res) => {

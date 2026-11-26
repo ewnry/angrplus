@@ -7,13 +7,15 @@ const compiled = ts.transpileModule(readFileSync('src/desktop.ts', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText;
 
-async function fixture(proxyPort = 50999, lsPort = 54321) {
+async function fixture(proxyPort = 50999, lsPort = 54321, networkMode = 'direct') {
   const events = new Map<string, (...args: unknown[]) => void>();
   let intercept: (details: { url: string }, callback: ReturnType<typeof vi.fn>) => void;
   const register = vi.fn();
   const stop = vi.fn().mockResolvedValue(undefined);
   const showErrorBox = vi.fn();
   const origLoadURL = vi.fn().mockResolvedValue(undefined);
+  const activateProfile = vi.fn();
+  const ipcHandlers = new Map<string, (...args: any[]) => any>();
   class MockBrowserWindow {
     loadURL(url: string, options?: unknown) {
       return origLoadURL(url, options);
@@ -33,10 +35,12 @@ async function fixture(proxyPort = 50999, lsPort = 54321) {
       app: { whenReady: () => Promise.resolve(), on: (name: string, fn: (...args: unknown[]) => void) => events.set(name, fn) },
       session: { defaultSession: { webRequest: { onBeforeRequest: (fn: any) => (intercept = fn) } } },
       dialog: { showErrorBox },
+      ipcMain: { handle: (name: string, fn: (...args: any[]) => any) => ipcHandlers.set(name, fn) },
       BrowserWindow: MockBrowserWindow,
     },
     './customIpc': { registerCustomModelHandlers: register },
     './proxy': { getProxyPort: () => proxyPort, stopProxy: stop },
+    './networkRoute': { readSettings: () => ({ mode: networkMode }), activateProfile, listProfiles: () => ({ activeId: 'a', profiles: [{ id: 'a', name: 'Primary', mode: 'socks5' }, { id: 'b', name: '<Backup>', mode: 'http' }] }) },
   };
   runInNewContext(compiled, {
     exports: exported,
@@ -59,6 +63,8 @@ async function fixture(proxyPort = 50999, lsPort = 54321) {
     showErrorBox,
     BrowserWindow: dependencies.electron.BrowserWindow,
     origLoadURL,
+    activateProfile,
+    ipcHandlers,
     setLsPort(p: number) {
       currentLsPort = p;
     },
@@ -135,7 +141,7 @@ describe('additive desktop integration', () => {
     vi.useFakeTimers();
     const f = await fixture(50999, 54321), events = new Map<string, (...args: any[]) => void>();
     const loadURL = vi.fn().mockResolvedValue(undefined);
-    f.events.get('browser-window-created')!({}, { isDestroyed: () => false, loadURL, webContents: { on: (name: string, callback: (...args: any[]) => void) => events.set(name, callback) } });
+    f.events.get('browser-window-created')!({}, { isDestroyed: () => false, loadURL, webContents: { id: 22, on: (name: string, callback: (...args: any[]) => void) => events.set(name, callback) } });
     try {
       const fail = events.get('did-fail-load')!;
       fail({}, -7, 'ERR_TIMED_OUT', 'https://127.0.0.1:1234/', true);
@@ -146,6 +152,33 @@ describe('additive desktop integration', () => {
       fail({}, -7, 'ERR_TIMED_OUT', 'https://127.0.0.1:54321/', true);
       expect(f.showErrorBox).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('offers recovery for a local timeout with an active proxy and changes routing only on request', async () => {
+    const f = await fixture(50999, 54321, 'socks5');
+    const events = new Map<string, (...args: any[]) => void>();
+    const loadURL = vi.fn().mockResolvedValue(undefined);
+    f.events.get('browser-window-created')!({}, { isDestroyed: () => false, loadURL, webContents: { id: 22, on: (name: string, callback: (...args: any[]) => void) => events.set(name, callback) } });
+    events.get('did-fail-load')!({}, -7, 'ERR_TIMED_OUT', 'https://127.0.0.1:54321/', true);
+    expect(loadURL.mock.calls[0][0]).toMatch(/^data:text\/html/);
+    expect(f.activateProfile).not.toHaveBeenCalled();
+    const html = decodeURIComponent(loadURL.mock.calls[0][0]);
+    expect(html).toContain('&lt;Backup&gt;');
+    expect(html).not.toContain('agy-recovery.invalid');
+    expect(html).toContain('data-recovery-form');
+    expect(f.ipcHandlers.get('agy-recovery:retry')!({ sender: { id: 99, getURL: () => 'https://example.com/' } }).success).toBe(false);
+    expect(f.ipcHandlers.get('agy-recovery:retry')!({ sender: { id: 22 } }).success).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(loadURL).toHaveBeenLastCalledWith('https://127.0.0.1:54321/');
+  });
+
+  it('retries from a restored recovery renderer even when its webContents id changed', async () => {
+    const f = await fixture();
+    const loadURL = vi.fn().mockResolvedValue(undefined);
+    const sender = { id: 99, getURL: () => 'data:text/html;charset=utf-8,%3Cbody%20data-agy-recovery%3E', isDestroyed: () => false, loadURL };
+    expect(f.ipcHandlers.get('agy-recovery:retry')!({ sender }).success).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(loadURL).toHaveBeenCalledWith('https://127.0.0.1:54321/');
   });
 
   it('rewrites premature port 0 loadURL immediately when LS port is already known', async () => {

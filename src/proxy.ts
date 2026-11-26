@@ -111,10 +111,21 @@ export function getLanguageServerPort(): number | undefined {
   return languageServerPortResolver ? languageServerPortResolver() : undefined;
 }
 
+type AccountPoolProvider = Partial<typeof import('./accountPool')>;
+let customAccountProvider: AccountPoolProvider | null = null;
+/** Override pool operations in the proxy. Unspecified operations use the built-in pool. */
+export function registerAccountProvider(provider: AccountPoolProvider): () => void {
+  if (!provider || typeof provider !== 'object' || typeof provider.loadPoolConfig !== 'function' || typeof provider.getEffectiveAccountForRequest !== 'function') throw new Error('Account provider requires loadPoolConfig and getEffectiveAccountForRequest');
+  if (customAccountProvider) throw new Error('An account provider is already registered');
+  customAccountProvider = provider;
+  return () => { if (customAccountProvider === provider) customAccountProvider = null; };
+}
+
 function getAccountPool(): typeof import('./accountPool') | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('./accountPool');
+    const builtin: typeof import('./accountPool') = require('./accountPool');
+    return customAccountProvider ? Object.assign(Object.create(builtin), customAccountProvider) : builtin;
   } catch {
     return null;
   }
@@ -480,7 +491,7 @@ async function proxyToGoogle(req: http.IncomingMessage, res: http.ServerResponse
 
     const streamTimeoutMs = isGeneration ? 120_000 : 60_000;
 
-    const proxyReq = https.request(parsedUrl, options, (proxyRes) => {
+    const proxyReq = require('./networkRoute').requestGoogle(parsedUrl, options, (proxyRes: http.IncomingMessage) => {
       const resetStreamTimeout = () => { if (!proxyReq.destroyed) proxyReq.setTimeout(streamTimeoutMs); };
       resetStreamTimeout();
 
@@ -1123,7 +1134,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
         headers: fwdHeaders as Record<string, string>,
       };
 
-      const googleReq = https.request(parsedUrl, fwdOptions, (googleRes) => {
+      const googleReq = require('./networkRoute').requestGoogle(parsedUrl, fwdOptions, (googleRes: http.IncomingMessage) => {
         // P0-5: Timeout for fetchAvailableModels forward request (30s)
         googleReq.setTimeout(30_000, () => {
           log.error('[Proxy] fetchAvailableModels forward request timed out');
@@ -1362,7 +1373,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
 
       const mdlOptions: https.RequestOptions = { method: 'GET', headers: mdlHeaders as Record<string, string> };
 
-      const googleReq = https.request(parsedUrl, mdlOptions, (googleRes) => {
+      const googleReq = require('./networkRoute').requestGoogle(parsedUrl, mdlOptions, (googleRes: http.IncomingMessage) => {
         // P0-5: Timeout for models list forward request (30s)
         googleReq.setTimeout(30_000, () => {
           log.error('[Proxy] Models list forward request timed out');

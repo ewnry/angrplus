@@ -26,6 +26,12 @@ export function registerCustomModelHandlers(): void {
       }
     });
   };
+  handle('network-route:get', () => ({ success:true, ...require('./networkRoute').publicSettings() }));
+  handle('network-route:save', (settings: unknown) => { require('./networkRoute').saveSettings(settings); return {success:true}; });
+  handle('network-route:list', () => ({success:true,...require('./networkRoute').listProfiles()}));
+  handle('network-route:upsert', (profile: unknown) => ({success:true,id:require('./networkRoute').upsertProfile(profile)}));
+  handle('network-route:activate', (id: string | null) => {require('./networkRoute').activateProfile(id);return {success:true};});
+  handle('network-route:delete', (id: string) => {require('./networkRoute').deleteProfile(id);return {success:true};});
   const channelStatePath = path.join(app.getPath('userData'), 'antigravity-plus-channels.json');
   const channelVersion = () => `${require('./plusUpdater').ANTIGRAVITY_PLUS_VERSION}/${app.getVersion()}`;
   const readChannelState = (): { shownVersion?: string; opened?: Record<string, boolean> } => {

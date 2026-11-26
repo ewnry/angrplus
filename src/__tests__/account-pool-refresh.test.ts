@@ -12,6 +12,7 @@ vi.mock('node:fs', () => ({
   renameSync: () => { disk.current = disk.temporary; },
 }));
 vi.mock('node:https', () => ({ request: vi.fn() }));
+vi.mock('../networkRoute', async () => { const client = await import('node:https'); return { requestGoogle: (...args: any[]) => (client.request as any)(...args) }; });
 import { loadPoolConfig, savePoolConfig, refreshPooledAccount, type PooledAccount } from '../accountPool';
 
 afterEach(() => vi.clearAllMocks());

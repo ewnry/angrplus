@@ -106,10 +106,10 @@ async function postJson(
   body: string,
 ): Promise<{ status: number; data: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
-    const request = (url.protocol === 'https:' ? https : http).request(
+    const request = (url.protocol === 'https:' ? require('./networkRoute').requestGoogle : http.request)(
       url,
       { method: 'POST', headers: { ...headers, 'Content-Length': Buffer.byteLength(body) } },
-      (response) => {
+      (response: http.IncomingMessage) => {
         let bytes = 0;
         const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer) => {

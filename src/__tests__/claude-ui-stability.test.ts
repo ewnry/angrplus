@@ -41,6 +41,18 @@ function models(f: ReturnType<typeof fixture>) {
 }
 
 describe('Claude composer DOM stability', () => {
+  it('lets a custom theme switch the real Cowork view and return to Code', () => {
+    const f = fixture();
+    runInContext(`coworkView = { sync(active) { window.coworkActive = active; } }; window.themeServices = createPlusThemeServices();`, f.context);
+    runInContext(`window.themeServices.layout.set('cowork')`, f.context);
+    expect((f.dom.window as any).coworkActive).toBe(true);
+    expect(f.document.body.classList.contains('agy-custom-cowork-enabled')).toBe(true);
+    expect(runInContext(`window.themeServices.layout.get()`, f.context)).toBe('cowork');
+    runInContext(`window.themeServices.layout.set('code')`, f.context);
+    expect((f.dom.window as any).coworkActive).toBe(false);
+    expect(runInContext(`window.themeServices.layout.set('invalid')`, f.context)).toBe(false);
+  });
+
   it('shows the patch version beside the native app version and avoids duplicate rows', () => {
     const f = fixture();
     const menu = f.document.createElement('div');

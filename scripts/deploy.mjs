@@ -22,6 +22,7 @@ export const REQUIRED_BUILD_FILES = [
   'pluginRuntime.js',
   'pluginUI.js',
   'pluginCatalog.js',
+  'networkRoute.js',
   'loadingOverlay.js',
   'customPreload.js',
   'customIpc.js',

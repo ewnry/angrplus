@@ -259,7 +259,7 @@ export async function runCustomModelRequest(
           }
           counts.upstreamAttempts += 1;
           const upstream = await new Promise<http.IncomingMessage>((resolve, reject) => {
-            request = (url.protocol === 'https:' ? https : http).request(
+            request = (url.protocol === 'https:' ? require('../networkRoute').requestGoogle : http.request)(
               url,
               { method: 'POST', headers, rejectUnauthorized: !model.allowUnauthorized },
               resolve,

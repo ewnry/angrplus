@@ -59,7 +59,7 @@ function exchangeToken(parameters: URLSearchParams, signal: AbortSignal): Promis
       if (error) reject(error);
       else resolve(value!);
     };
-    const req = https.request(
+    const req = (require('./networkRoute') as typeof import('./networkRoute')).requestGoogle(
       GOOGLE_TOKEN_URL,
       {
         method: 'POST',

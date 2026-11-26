@@ -55,3 +55,28 @@ return () => api.log('Theme removed');
 ```
 
 `@add selector | tag | class | text` appends an element to the first matching parent and automatically removes it when the theme is reapplied or disabled. Optional `@script` runs JavaScript with `document`, `window`, and `api`; return a cleanup function. `@layout claude` enables the built-in Claude layout hooks; it is used in the provided `claude-desktop.plus`. Directives are parsed before CSS, and the theme must start with `@plus 1` and contain `@css`. Enable only trusted themes: scripts can read and modify the app interface.
+
+### Replace an interface area and connect its actions
+
+The theme script and inline plugins have `api.ui`. `api.ui.replace(selector, render)` keeps the original React element mounted but hidden and inserts the element returned by `render(original)` next to it. It watches for the native element being recreated and mounts the replacement again. Disabling or reapplying the theme removes the custom view and restores the original element. The method also returns a function that removes that replacement immediately.
+
+```text
+@plus 1
+@script
+api.ui.replace('[data-testid="model-selector-trigger"]', (original) => {
+  const button = document.createElement('button');
+  button.className = 'my-model-button';
+  button.textContent = 'Choose model';
+  button.onclick = () => original.click();
+  return button;
+});
+@end
+@css
+.my-model-button { border-radius: 8px; padding: 8px 12px; }
+```
+
+`api.ui.find(selector)` finds an existing element; `api.ui.click(selector)` runs its click handler and returns whether it was available. `api.ui.setValue(selector, value)` updates an input, textarea or editable element and sends input/change events. Themes also have `api.models.get()`, `api.models.select(value)`, `api.models.effort()`, `api.models.setEffort(level)`, `api.models.subscribe(callback)`, `api.permissions.get()`, `api.permissions.open()` and `api.permissions.select(label)`. The older `api.getModels`, `api.selectModel` and `api.setEffort` aliases remain available. See [plugins.md](plugins.md) and `examples/plugins/model-controls` for the data shapes and a working picker. CSS styles the replacement; actions require the script block. These hooks work with the actual UI and may need new selectors when Google changes its DOM; hiding an element does not turn its internal React components into a stable public API.
+
+### Switching Code and Gemini Web
+
+`api.layout.get()` returns `code` or `cowork`. Use `api.layout.set("code")` or `api.layout.set("cowork")` to switch the actual view; the latter opens Gemini Web and requires the existing Gemini Web session. `api.layout.openSettings()` opens native Antigravity settings; `api.layout.openAccounts()` opens the Antigravity+ account pool when available and returns `false` otherwise. A theme that enables Cowork should switch back to Code and remove `agy-custom-cowork-enabled` in its cleanup.

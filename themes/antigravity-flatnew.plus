@@ -1,0 +1,37 @@
+@plus 1
+@layout native
+@script
+document.body.classList.add("agy-theme-antigravity-old", "agy-theme-antigravity-flatnew");
+return () => document.body.classList.remove("agy-theme-antigravity-old", "agy-theme-antigravity-flatnew");
+@end
+@css
+body.agy-theme-antigravity-old .surface-composer,
+body.agy-theme-antigravity-old .surface-composer-card,
+body.agy-theme-antigravity-old [data-testid="user-message-bubble"],
+body.agy-theme-antigravity-old [data-testid="user-input-step"],
+body.agy-theme-antigravity-old [data-testid="agent-input-box"],
+body.agy-theme-antigravity-old .agy-sidebar-row,
+body.agy-theme-antigravity-old [data-testid="user-input-step"] [class*="group-hover/user-input-step"],
+body.agy-theme-antigravity-old [role="dialog"],
+body.agy-theme-antigravity-old [role="menu"],
+body.agy-theme-antigravity-old button,
+body.agy-theme-antigravity-old input,
+body.agy-theme-antigravity-old textarea { box-shadow:none!important; text-shadow:none!important; }
+body.agy-theme-antigravity-old .surface-composer,
+body.agy-theme-antigravity-old .surface-composer-card,
+body.agy-theme-antigravity-old [data-testid="user-message-bubble"] { background-image:none!important; }
+body.agy-theme-antigravity-old .surface-composer { border:1px solid var(--border, #393a48)!important; border-radius:14px!important; padding:0!important; }
+body.agy-theme-antigravity-old .surface-composer-card { border:0!important; border-radius:13px!important; }
+body.agy-theme-antigravity-old [data-testid="user-message-bubble"] { border-radius:12px!important; }
+body.agy-theme-antigravity-old [class*="surface-"] { box-shadow:none!important; text-shadow:none!important; }
+body.agy-theme-antigravity-old [data-testid="user-input-step"] [class*="shadow"],
+body.agy-theme-antigravity-old [data-testid="agent-input-box"] [class*="shadow"] { box-shadow:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) [data-testid="home-greeting"] .home-greeting-mark { display:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .surface-composer { border-radius:12px!important; }
+/* 2.28 placed the new-chat composer around 30% down the page. */
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home > [data-media-drop-scope] { justify-content:flex-start!important; padding-top:30vh!important; padding-bottom:24px!important; box-sizing:border-box!important; overflow-y:auto!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home [data-media-drop-scope] > .overflow-y-auto { flex:0 0 auto!important; min-height:0!important; padding-top:0!important; padding-bottom:0!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home [data-testid="home-greeting"] { display:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home div:has(> [data-testid="home-greeting"]) { display:none!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home [data-media-drop-scope] > .shrink-0 { padding-bottom:0!important; }
+body.agy-theme-antigravity-old:not(.agy-theme-antigravity-flatnew) .agy-home #agy-native-history-host { order:2!important; }
