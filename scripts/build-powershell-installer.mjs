@@ -10,5 +10,5 @@ script=script.replace(/\$release = '[^']*'/,`$release = '${version}'`).replace('
 script=script.replace('Invoke-WebRequest -UseBasicParsing -Uri "https://ag.rak.wtf/runtime-patch.zip?release=$release" -OutFile $archive',`[IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String('${archive.toString('base64')}'))`);
 script=script.replace('Downloading patch modules...','Extracting patch modules...');
 const output=path.resolve(process.argv[2]||path.join(root,'AntigravityPlus_Windows.ps1'));
-fs.writeFileSync(output,'\uFEFF'+script,'utf8');
+fs.writeFileSync(output,script,'utf8');
 console.log(`PowerShell ${version}: ${output} (${fs.statSync(output).size} bytes)`);

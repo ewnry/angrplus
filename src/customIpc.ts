@@ -258,37 +258,13 @@ export function registerCustomModelHandlers(): void {
     };
   });
 
-  handle('pool:capture-native', async () => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    const account = await accountPool.captureActiveNativeSession();
-    return { success: true, account };
-  });
+  handle('pool:capture-native', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
-  handle('pool:start-login', async () => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    try {
-      const account = await accountPool.startAddGoogleAccountFlow((url: string) => shell.openExternal(url));
-      return { success: true, account };
-    } catch (err: any) {
-      return { success: false, error: err?.message || String(err) };
-    }
-  });
+  handle('pool:start-login', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
-  handle('pool:cancel-login', () => {
-    if (accountPool) accountPool.cancelAddGoogleAccountFlow();
-    return { success: true };
-  });
+  handle('pool:cancel-login', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
-  handle('pool:set-active', (accountId: string) => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    const cfg = accountPool.loadPoolConfig();
-    if (cfg.accounts.some((a: any) => a.id === accountId)) {
-      cfg.activeAccountId = accountId;
-      accountPool.savePoolConfig(cfg);
-      return { success: true };
-    }
-    return { success: false, error: 'Account not found' };
-  });
+  handle('pool:set-active', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
   handle(
     'pool:set-options',
@@ -336,64 +312,13 @@ export function registerCustomModelHandlers(): void {
 
   handle('plus:relaunch-admin', () => require('./elevation').relaunchAsAdministrator());
 
-  handle('pool:remove-account', (accountId: string) => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    const cfg = accountPool.loadPoolConfig();
-    cfg.accounts = cfg.accounts.filter((a: any) => a.id !== accountId);
-    if (cfg.activeAccountId === accountId) {
-      cfg.activeAccountId = cfg.accounts[0]?.id;
-    }
-    accountPool.savePoolConfig(cfg);
-    return { success: true };
-  });
+  handle('pool:remove-account', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
-  handle('pool:refresh-quota', async () => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    const { summary } = await accountPool.fetchCombinedPoolQuota();
-    return { success: true, summary };
-  });
+  handle('pool:refresh-quota', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
-  handle('pool:export-config', () => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    const cfg = accountPool.loadPoolConfig();
-    return { success: true, json: JSON.stringify(cfg, null, 2) };
-  });
+  handle('pool:export-config', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
-  handle('pool:import-config', (jsonStr: string) => {
-    if (!accountPool) return { success: false, error: 'Module not available' };
-    try {
-      const data = JSON.parse(jsonStr);
-      if (!data || !Array.isArray(data.accounts)) {
-        return { success: false, error: 'Invalid config format: missing accounts array.' };
-      }
-      const existing = accountPool.loadPoolConfig();
-      let importedCount = 0;
-      for (const acc of data.accounts) {
-        if (!acc.email || !acc.refreshToken) continue;
-        const matchIdx = existing.accounts.findIndex((a: any) => a.email === acc.email);
-        if (matchIdx >= 0) {
-          existing.accounts[matchIdx] = { ...existing.accounts[matchIdx], ...acc };
-        } else {
-          existing.accounts.push(acc);
-        }
-        importedCount++;
-      }
-      if (data.quotaDisplayMode) existing.quotaDisplayMode = data.quotaDisplayMode;
-      if (typeof data.showActiveInLimits === 'boolean') existing.showActiveInLimits = data.showActiveInLimits;
-      if (typeof data.autoHotswap === 'boolean') existing.autoHotswap = data.autoHotswap;
-      if (typeof data.combineLimits === 'boolean') existing.combineLimits = data.combineLimits;
-      if (typeof data.soundEnabled === 'boolean') existing.soundEnabled = data.soundEnabled;
-      if (data.soundTheme) existing.soundTheme = data.soundTheme;
-      if (data.activeAccountId) existing.activeAccountId = data.activeAccountId;
-      if (data.updateServerUrl) existing.updateServerUrl = data.updateServerUrl;
-      if (typeof data.autoCheckUpdates === 'boolean') existing.autoCheckUpdates = data.autoCheckUpdates;
-
-      accountPool.savePoolConfig(existing);
-      return { success: true, count: importedCount };
-    } catch (e: any) {
-      return { success: false, error: `Import failed: ${e?.message || String(e)}` };
-    }
-  });
+  handle('pool:import-config', () => ({ success: false, error: 'Account Pool is unavailable in the GitHub edition' }));
 
   handle('sound:get-audio-data', (soundName: string) => {
     const fs = require('node:fs');

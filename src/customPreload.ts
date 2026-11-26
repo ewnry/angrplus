@@ -2667,10 +2667,6 @@ function openHamburgerMenu(): void {
       <span>Settings</span>
       <span class="agy-menu-shortcut">Ctrl+,</span>
     </button>
-    <button type="button" class="agy-menu-item" id="agy-hmenu-pool">
-      ${CLAUDE_ICONS.spark}
-      <span>Account Pool</span>
-    </button>
   `;
   document.body.append(pop);
 
@@ -4062,10 +4058,6 @@ function toggleUserMenu(): void {
       ${CLAUDE_ICONS.gear}
       <span>Settings</span>
       <span class="agy-menu-shortcut">Ctrl+,</span>
-    </button>
-    <button type="button" class="agy-menu-item" id="agy-btn-pool">
-      ${CLAUDE_ICONS.spark}
-      <span>Account Pool</span>
     </button>
     <button type="button" class="agy-menu-item" id="agy-btn-theme-default">
       ${CLAUDE_ICONS.customize}
@@ -7245,7 +7237,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
             await refresh();
           })));
         sec1.append(poolCard);
-        contentArea.append(sec1);
+
 
         const netResult = await ipcRenderer.invoke('network-route:list');
         const networkSection = element('div', 'space-y-2');
@@ -7660,7 +7652,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
           });
         }
         sec3.append(accountsCard);
-        contentArea.append(sec3);
+
 
         // --- SECTION 4: Custom Models & Local Gateways ---
         let customModels: CustomModelEntry[] = [];
@@ -8268,6 +8260,7 @@ body.agy-theme-antigravity-flatnew .agy-general-select-menu { box-shadow:none!im
 
   function injectPoolStatusPill(): void {
     if (typeof document === 'undefined' || !document || !document.body) return;
+    return;
     if (document.getElementById('agy-pool-pill')) return;
     installStyles();
     const pill = element('button', 'agy-pool-pill');

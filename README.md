@@ -3,7 +3,7 @@
 # Antigravity+ (`angrplus`)
 
 <p align="center">
-  <strong>Multi-account quota pooling, zero-hang hot-swapping & refined UI for Google Antigravity</strong>
+  <strong>Custom models, plugins and refined UI for Google Antigravity</strong>
 </p>
 
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fag.rak.wtf%2Fapi%2Fversion&query=%24.version&label=Antigravity%2B&color=blue&style=for-the-badge&logo=electron)](https://github.com/ewnry/angrplus)
@@ -29,7 +29,7 @@
 
 ## ⚡ Overview
 
-**Antigravity+** transforms the standard Google Antigravity environment into a resilient, multi-account setup with authentic UI polish. By routing language server requests through a high-performance local reverse proxy, Antigravity+ seamlessly rotates pooled Google accounts whenever rate limits or quotas are reached — keeping generation and thinking streams uninterrupted.
+**Antigravity+** adds custom models, plugins and interface themes to Google Antigravity. The GitHub edition does not include Account Pool or automatic account switching.
 
 ---
 
@@ -37,23 +37,9 @@
 
 <table>
   <tr>
-    <td width="50%">
-      <h3>🔄 Multi-Account Pool</h3>
-      <p>Aggregates multiple Google accounts into a single pool. When your active account runs out of quota, requests automatically switch to the next available account without dropping the prompt.</p>
-    </td>
-    <td width="50%">
-      <h3>🎯 Model-Aware Quotas</h3>
-      <p>Separates <code>3p-*</code> quota buckets (Claude Sonnet / Opus) from <code>gemini-*</code> (Gemini 3.8 Flash). Exhausting Claude quota never blocks Gemini, and vice versa.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <h3>🛡️ Zero-Hang Hot-Swap</h3>
-      <p>Replaces dead connections on HTTP 429/403 with chunk-resetting timeouts (120s+ for deep Claude thinking mode). Eliminates the infamous permanent <code>working...</code> hang.</p>
-    </td>
-    <td width="50%">
+    <td colspan="2">
       <h3>🎨 Custom UI Controls</h3>
-      <p>Clean model selector, dynamic Claude version labels (4.6 / 5.5), reasoning effort picker, context usage overview, and minimalist dark surfaces.</p>
+      <p>Model selection, reasoning effort, context usage and interface themes.</p>
     </td>
   </tr>
   <tr>
@@ -128,10 +114,7 @@ npm run build:installer
 │       │ Points to --api_server_url http://127.0.0.1    │
 │       ▼                                                │
 │  [Antigravity+ Proxy (port 50999)]                     │
-│       │ Model-aware routing & pool management          │
-│       ├── Claude request → Checks 3p quota bucket      │
-│       ├── Gemini request → Checks gemini quota bucket  │
-│       └── On 429: Hot-swaps OAuth token & retries      │
+│       │ Model routing and custom provider requests      │
 │                                                        │
 └─────────────────────────┬──────────────────────────────┘
                           │
@@ -169,8 +152,6 @@ npm run patch:restore
 
 Distributed under the **Apache-2.0** License. See [LICENSE](LICENSE) for details.
 
-### OAuth configuration for source builds
+### GitHub edition
 
-OAuth client credentials are intentionally omitted from this repository. Supply valid credentials through `ANTIGRAVITY_OAUTH_CLIENT_ID` and `ANTIGRAVITY_OAUTH_CLIENT_SECRET` in the environment where the application runs. The build warns when either variable is absent; Google account login and token refresh require working credentials. Do not commit credentials or print them in build logs.
-
-The GitHub release does not include Google OAuth credentials. Account Pool login is unavailable until those environment variables are configured. Other releases are distributed separately.
+Account Pool and automatic account switching are unavailable in this edition.
